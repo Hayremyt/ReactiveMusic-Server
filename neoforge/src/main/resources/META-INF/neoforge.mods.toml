@@ -1,0 +1,24 @@
+modLoader="neoforge"
+loaderVersion="[21,)"
+license="GPLv3"
+
+[[mods]]
+modId="reactivemusic-server"
+version="${version}"
+displayName="${name}"
+description="Server-side part of ReactiveMusic"
+authors="CircuitLord"
+
+[[dependencies.reactivemusic-server]]
+modId="neoforge"
+mandatory=true
+versionRange="[21,)"
+ordering="NONE"
+side="SERVER"
+
+[[dependencies.reactivemusic-server]]
+modId="minecraft"
+mandatory=true
+versionRange="[1.21.1,1.21.1]"
+ordering="NONE"
+side="SERVER"
