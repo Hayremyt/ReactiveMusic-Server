@@ -5,16 +5,17 @@ plugins {
 
 val minecraft = stonecutter.current.version
 
-version = "${mod.version}+$minecraft"
-group = mod.group
-base {
-    archivesName.set("${mod.id}-common")
-}
+val modVersion: String = project.findProperty("mod.version") as String
+val modGroup: String = project.findProperty("mod.group") as String
+val modId: String = project.findProperty("mod.id") as String
+val modName: String = project.findProperty("mod.name") as String
+val yarnBuild: String = project.findProperty("deps.yarn_build") as String
 
-architectury.common(stonecutter.tree.branches.mapNotNull {
-    if (stonecutter.current.project !in it) null
-    else it.project.prop("loom.platform")
-})
+version = "${modVersion}+$minecraft"
+group = modGroup
+base {
+    archivesName.set("${modId}-common")
+}
 
 repositories {
     maven("https://maven.terraformersmc.com/releases/") { name = "Terraformers" }
@@ -22,9 +23,7 @@ repositories {
 
 dependencies {
     minecraft("com.mojang:minecraft:$minecraft")
-    mappings("net.fabricmc:yarn:$minecraft+build.${mod.dep("yarn_build")}:v2")
-    modImplementation("net.fabricmc:fabric-loader:${mod.dep("fabric_loader")}")
-
+    mappings("net.fabricmc:yarn:$minecraft+build.$yarnBuild:v2")
 }
 
 java {

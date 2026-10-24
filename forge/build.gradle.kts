@@ -12,9 +12,18 @@ val common: Project = requireNotNull(stonecutter.node.sibling("")?.project) {
     "No common project for $project"
 }
 
-version = "${mod.version}+$minecraft"
+val modVersion: String = common.project.findProperty("mod.version") as String
+val modGroup: String = common.project.findProperty("mod.group") as String
+val modId: String = common.project.findProperty("mod.id") as String
+val modName: String = common.project.findProperty("mod.name") as String
+val yarnBuild: String = common.project.findProperty("deps.yarn_build") as String
+val forgeLoader: String = common.project.findProperty("deps.forge_loader") as String
+val mcDepForge: String = common.project.findProperty("mod.mc_dep_forgelike") as String
+val loaderDepForge: String = common.project.findProperty("mod.loader_dep_forge") as String
+
+version = "${modVersion}+$minecraft"
 base {
-    archivesName.set("${mod.id}-$loader")
+    archivesName.set("${modId}-$loader")
 }
 architectury {
     platformSetupLoomIde()
@@ -43,8 +52,8 @@ repositories {
 
 dependencies {
     minecraft("com.mojang:minecraft:$minecraft")
-    mappings("net.fabricmc:yarn:$minecraft+build.${common.mod.dep("yarn_build")}:v2")
-    "forge"("net.minecraftforge:forge:$minecraft-${common.mod.dep("forge_loader")}")
+    mappings("net.fabricmc:yarn:$minecraft+build.$yarnBuild:v2")
+    "forge"("net.minecraftforge:forge:$minecraft-$forgeLoader")
 
     commonBundle(project(common.path, "namedElements")) { isTransitive = false }
     shadowBundle(project(common.path, "transformProductionForge")) { isTransitive = false }
@@ -90,11 +99,11 @@ tasks.shadowJar {
 
 tasks.processResources {
     properties(listOf("META-INF/mods.toml", "pack.mcmeta"),
-        "id" to mod.id,
-        "name" to mod.name,
-        "version" to mod.version,
-        "minecraft" to common.mod.prop("mc_dep_forgelike"),
-        "loader" to common.mod.prop("loader_dep_forge")
+        "id" to modId,
+        "name" to modName,
+        "version" to modVersion,
+        "minecraft" to mcDepForge,
+        "loader" to loaderDepForge
     )
 }
 
@@ -107,6 +116,6 @@ tasks.register<Copy>("buildAndCollect") {
     group = "versioned"
     description = "Must run through 'chiseledBuild'"
     from(tasks.remapJar.get().archiveFile, tasks.remapSourcesJar.get().archiveFile)
-    into(rootProject.layout.buildDirectory.file("libs/${mod.version}/$loader"))
+    into(rootProject.layout.buildDirectory.file("libs/${modVersion}/$loader"))
     dependsOn("build")
 }

@@ -15,7 +15,7 @@ stonecutter registerChiseled tasks.register("chiseledBuild", stonecutter.chisele
 // Builds loader-specific versions into `build/libs/{mod.version}/{loader}`
 for (it in stonecutter.tree.branches) {
     if (it.id.isEmpty()) continue
-    val loader = it.id.upperCaseFirst()
+    val loader = it.id.replaceFirstChar { it.uppercase() }
     stonecutter registerChiseled tasks.register("chiseledBuild$loader", stonecutter.chiseled) {
         group = "project"
         versions { branch, _ -> branch == it.id }
@@ -23,30 +23,22 @@ for (it in stonecutter.tree.branches) {
     }
 }
 
-// Runs active versions for each loader
-// For branches where the active version exists, use a simple dependsOn.
-// For branches where it doesn't (e.g. Forge only has 1.20.1 but active is 1.21.1),
-// use a chiseled task so Stonecutter properly sets up sources via chiseledSrc.
+// Runs active versions for each loader (Server only)
 for (branch in stonecutter.tree.branches) {
     if (branch.id.isEmpty()) continue
-    val loader = branch.id.upperCaseFirst()
-    val types = listOf("Client", "Server")
+    val loader = branch.id.replaceFirstChar { it.uppercase() }
 
     val activeNode = branch.nodes.find { it.metadata == stonecutter.current }
     if (activeNode != null) {
-        // Active version exists in this branch — direct dependsOn works
-        for (type in types) tasks.register("runActive$type$loader") {
+        tasks.register("runActiveServer$loader") {
             group = "project"
-            dependsOn("${activeNode.hierarchy}:run$type")
+            dependsOn("${activeNode.hierarchy}:runServer")
         }
     } else {
-        // No active version in this branch — use chiseled tasks to set up sources
-        for (type in types) {
-            stonecutter registerChiseled tasks.register("runActive$type$loader", stonecutter.chiseled) {
-                group = "project"
-                versions { branchId, _ -> branchId == branch.id }
-                ofTask("run$type")
-            }
+        stonecutter registerChiseled tasks.register("runActiveServer$loader", stonecutter.chiseled) {
+            group = "project"
+            versions { branchId, _ -> branchId == branch.id }
+            ofTask("runServer")
         }
     }
 }
