@@ -1,0 +1,19 @@
+{
+	"schemaVersion": 1,
+	"id": "${id}",
+	"version": "${version}",
+	"name": "${name}",
+	"description": "Server-side part of ReactiveMusic: provides exact mob targets and structure data to clients.",
+	"authors": ["CircuitLord"],
+	"license": "GPLv3",
+	"environment": "server",
+	"entrypoints": {
+		"server": [
+			"circuitlord.reactivemusic.fabric.server.ReactiveMusicServerFabric"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.15.0",
+		"minecraft": "${minecraft}"
+	}
+}
