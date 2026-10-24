@@ -1,0 +1,24 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="GPLv3"
+
+[[mods]]
+modId="reactivemusic-server"
+version="${version}"
+displayName="${name}"
+description="Server-side part of ReactiveMusic"
+authors="CircuitLord"
+
+[[dependencies.reactivemusic-server]]
+modId="forge"
+mandatory=true
+versionRange="[47,)"
+ordering="NONE"
+side="SERVER"
+
+[[dependencies.reactivemusic-server]]
+modId="minecraft"
+mandatory=true
+versionRange="[1.19.2,1.20.1]"
+ordering="NONE"
+side="SERVER"
