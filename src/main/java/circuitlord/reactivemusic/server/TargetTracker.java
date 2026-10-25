@@ -9,6 +9,7 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.math.BlockPos;
 
 /**
  * Отслеживает точные цели мобов на сервере.
@@ -16,13 +17,20 @@ import net.minecraft.server.world.ServerWorld;
  * Сервер знает реальный target каждого моба (MobEntity#getTarget, brain memory ATTACK_TARGET).
  * Эти данные никогда не присылаются клиенту ванильно, поэтому серверный мод хранит их здесь
  * и рассылает клиентам, которые просили target=me/other.
+ * <p>
+ * Помимо целей хранятся последние известные позиции мобов, чтобы сервер мог отправить пакет
+ * о цели только тем игрокам, которые находятся рядом с мобом (в радиусе скана клиента),
+ * и не утекал инфой игрокам за сотни блоков.
  */
 public class TargetTracker {
 
     /** UUID моба -> UUID цели (или null, если нет цели). */
     private final Map<UUID, UUID> mobTargets = new HashMap<>();
 
-    /** Последний тик обновления для каждого моба, чтобы清理ть мёртвые записи. */
+    /** UUID моба -> последняя известная позиция моба. */
+    private final Map<UUID, BlockPos> mobPositions = new HashMap<>();
+
+    /** Последний тик обновления для каждого моба, чтобы чистить мёртвые записи. */
     private final Map<UUID, Long> lastSeen = new HashMap<>();
 
     /**
@@ -39,6 +47,7 @@ public class TargetTracker {
             if (entity instanceof MobEntity mob) {
                 var target = mob.getTarget();
                 current.put(mob.getUuid(), target != null ? target.getUuid() : null);
+                mobPositions.put(mob.getUuid(), mob.getBlockPos());
                 lastSeen.put(mob.getUuid(), now);
             }
         }
@@ -49,6 +58,7 @@ public class TargetTracker {
 
         // Удаляем старые записи (мобы, которых больше нет)
         lastSeen.entrySet().removeIf(entry -> now - entry.getValue() > 400L); // 20 секунд
+        mobPositions.entrySet().removeIf(entry -> !lastSeen.containsKey(entry.getKey()));
 
         // Считаем изменения
         Map<UUID, UUID> changes = new HashMap<>();
@@ -77,9 +87,15 @@ public class TargetTracker {
         return mobTargets.get(mobUuid);
     }
 
+    /** Возвращает последнюю известную позицию моба, или null если моба нет в отслеживании. */
+    public BlockPos getMobPosition(UUID mobUuid) {
+        return mobPositions.get(mobUuid);
+    }
+
     /** Очистка при выгрузке мира. */
     public void clear() {
         mobTargets.clear();
+        mobPositions.clear();
         lastSeen.clear();
     }
 }

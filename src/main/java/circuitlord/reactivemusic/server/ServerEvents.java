@@ -49,6 +49,11 @@ public class ServerEvents {
         return lastTargetChanges;
     }
 
+    /** Позиция моба из последнего отслеживания (для отправки пакета цели только ближайшим игрокам). */
+    public net.minecraft.util.math.BlockPos getMobPosition(UUID mobUuid) {
+        return targetTracker.getMobPosition(mobUuid);
+    }
+
     /**
      * Запросить принудительную отправку структуры для игрока (например, при входе или смене измерения).
      */

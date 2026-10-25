@@ -47,10 +47,28 @@ public class ReactiveMusicServerFabric implements DedicatedServerModInitializer 
             // --- Отправка изменений целей мобов ---
             var targetChanges = serverEvents.getLastTargetChanges();
             if (!targetChanges.isEmpty()) {
-                for (var player : server.getPlayerManager().getPlayerList()) {
-                    if (!serverEvents.canSendMobTargets(player)) continue;
-                    for (var entry : targetChanges.entrySet()) {
-                        var packet = new ServerPackets.MobTargetPacket(entry.getKey(), entry.getValue());
+                int simDist = server.getSimulationDistance();
+                double maxDistSq = (double) simDist * simDist;
+                for (var entry : targetChanges.entrySet()) {
+                    UUID mobUuid = entry.getKey();
+                    UUID targetUuid = entry.getValue();
+                    var mobPos = serverEvents.getMobPosition(mobUuid);
+                    for (var player : server.getPlayerManager().getPlayerList()) {
+                        if (!serverEvents.canSendMobTargets(player)) continue;
+
+                        boolean send = false;
+                        // Всегда слать целевому игроку, даже если он далеко
+                        if (targetUuid != null && targetUuid.equals(player.getUuid())) {
+                            send = true;
+                        }
+                        // Иначе слать только игрокам рядом с мобом (в радиусе симуляции сервера)
+                        else if (mobPos != null) {
+                            double distSq = player.squaredDistanceTo(mobPos.getX(), mobPos.getY(), mobPos.getZ());
+                            if (distSq <= maxDistSq) send = true;
+                        }
+                        if (!send) continue;
+
+                        var packet = new ServerPackets.MobTargetPacket(mobUuid, targetUuid);
                         PacketByteBuf buf = new PacketByteBuf(PacketByteBufs.empty());
                         packet.write(buf);
                         ServerPlayNetworking.send(player, HandshakeConstants.CHANNEL_TARGETS, buf);
