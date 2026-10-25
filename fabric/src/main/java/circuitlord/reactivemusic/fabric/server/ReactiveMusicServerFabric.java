@@ -60,7 +60,7 @@ public class ReactiveMusicServerFabric implements DedicatedServerModInitializer 
                 ServerPlayerEntity player = context.player();
                 if (player == null || serverEvents == null) return;
                 serverEvents.onHandshakeRequest(player);
-                ServerPlayNetworking.send(player, new HandshakeResponsePayload("1.3.5"));
+                ServerPlayNetworking.send(player, new HandshakeResponsePayload(HandshakeConstants.MOD_VERSION));
             });
         });
         *///?} else {
@@ -70,7 +70,7 @@ public class ReactiveMusicServerFabric implements DedicatedServerModInitializer 
                     server.execute(() -> {
                         serverEvents.onHandshakeRequest(player);
                         PacketByteBuf out = PacketByteBufs.create();
-                        new HandshakePackets.HandshakeResponse("1.3.5").write(out);
+                        new HandshakePackets.HandshakeResponse(HandshakeConstants.MOD_VERSION).write(out);
                         ServerPlayNetworking.send(player, CHANNEL_ID, out);
                     });
                 });

@@ -169,7 +169,7 @@ public class ReactiveMusicServerForge {
                 if (player == null || serverEvents == null) return;
                 serverEvents.onHandshakeRequest(player);
                 handshakeChannel.send(PacketDistributor.PLAYER.with(() -> player),
-                        new HandshakeResponseMessage("1.3.5"));
+                        new HandshakeResponseMessage(HandshakeConstants.MOD_VERSION));
             });
             ctx.setPacketHandled(true);
         }

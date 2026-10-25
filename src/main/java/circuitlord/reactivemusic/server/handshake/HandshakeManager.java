@@ -34,7 +34,7 @@ public class HandshakeManager {
     private Path storePath = null;
 
     /** Версия протокола/мода, сохраняется вместе с состоянием. */
-    private String protocolVersion = "1.3.5";
+    private String protocolVersion = HandshakeConstants.MOD_VERSION;
 
     /** Таймаут ожидания ответа от сервера (в миллисекундах). Клиентская сторона. */
     public static final long HANDSHAKE_TIMEOUT_MS = 5000L;

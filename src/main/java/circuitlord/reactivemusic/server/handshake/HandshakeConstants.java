@@ -12,6 +12,9 @@ public final class HandshakeConstants {
     /** Интервал повторной отправки рукопожатия клиентом (в миллисекундах). */
     public static final long HANDSHAKE_RETRY_MS = 1000L;
 
+    /** Версия мода/протокола, которой обмениваются клиент и сервер. */
+    public static final String MOD_VERSION = "1.3.5";
+
     /** Идентификатор сетевого канала (используется всеми лоадерами). */
     public static final String CHANNEL_ID = "reactivemusic:server";
 

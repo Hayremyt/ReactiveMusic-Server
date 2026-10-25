@@ -38,6 +38,10 @@ public class ServerEvents {
     private final HandshakeManager handshakeManager = new HandshakeManager();
     private int ticksSinceUpdate = 0;
 
+    /** Пересчитываем цели мобов не каждый тик, а раз в N тиков (нагрузка на больших серверах). */
+    private int ticksSinceTargetReconcile = 0;
+    private static final int TARGET_RECONCILE_INTERVAL = 4; // 0.2s
+
     /** Для каждого игрока: текущий вид (UUID моба -> статус цели относительно игрока). */
     private final Map<UUID, Map<UUID, MobTargetStatus>> playerTargetViews = new HashMap<>();
 
@@ -80,7 +84,11 @@ public class ServerEvents {
      * Пересчитывает per-player состояние целей и (реже) структур.
      */
     public void onServerTick(MinecraftServer server) {
-        reconcileTargets(server);
+        ticksSinceTargetReconcile++;
+        if (ticksSinceTargetReconcile >= TARGET_RECONCILE_INTERVAL) {
+            reconcileTargets(server);
+            ticksSinceTargetReconcile = 0;
+        }
 
         ticksSinceUpdate++;
         if (ticksSinceUpdate >= 100) { // структуры — раз в 5 секунд

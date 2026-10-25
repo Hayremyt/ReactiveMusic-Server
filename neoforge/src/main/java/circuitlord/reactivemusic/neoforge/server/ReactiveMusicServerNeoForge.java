@@ -60,7 +60,7 @@ public class ReactiveMusicServerNeoForge {
             if (serverEvents == null) return;
             if (!(ctx.player() instanceof ServerPlayerEntity player)) return;
             serverEvents.onHandshakeRequest(player);
-            PacketDistributor.sendToPlayer(player, new HandshakeResponsePayload("1.3.5"));
+            PacketDistributor.sendToPlayer(player, new HandshakeResponsePayload(HandshakeConstants.MOD_VERSION));
         });
     }
 

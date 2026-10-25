@@ -1,11 +1,10 @@
 package circuitlord.reactivemusic.server;
 
 import java.util.HashSet;
-import java.util.Set;
 import java.util.Locale;
+import java.util.Set;
 
 import net.minecraft.server.world.ServerWorld;
-import net.minecraft.structure.StructureStart;
 import net.minecraft.util.math.BlockPos;
 //? if >=1.20 {
 import net.minecraft.registry.RegistryKeys;
@@ -16,54 +15,44 @@ import net.minecraft.registry.RegistryKeys;
 /**
  * Сканирует структуры вокруг позиции игрока на сервере.
  * <p>
- * Клиент не получает данные о структурах от ваниллы, поэтому сервер сканирует
- * чанки вокруг игрока и возвращает список структур, в bounding box которых
- * находится сам игрок.
+ * Использует {@code StructureAccessor.getStructureContaining}, который находит структуру,
+ * реально накрывающую позицию (с учётом ссылок между чанками), поэтому корректно работает и
+ * для огромных структур (mansion, ancient city), чей {@code StructureStart} лежит далеко от игрока.
  */
 public class StructureScanner {
 
     /**
-     * Сканирует чанки вокруг позиции игрока на наличие структур.
      * Возвращает множество ID структур, в bounding box которых находится игрок.
-     * Вызывается редко (раз в несколько секунд), так как структура игрока
-     * меняется только при перемещении между структурами.
+     * {@code radiusChunks} больше не используется (оставлен для совместимости вызовов):
+     * аксессор находит содержащую структуру напрямую, независимо от расстояния до её старта.
      */
     public Set<String> scan(ServerWorld world, BlockPos playerPos, int radiusChunks) {
         Set<String> found = new HashSet<>();
+        try {
+            var accessor = world.getStructureAccessor();
 
-        //? if >=1.21.11 {
-        /*var structureRegistry = world.getRegistryManager().getOrThrow(RegistryKeys.STRUCTURE);
-        *///?} else if >=1.20 {
-        var structureRegistry = world.getRegistryManager().get(RegistryKeys.STRUCTURE);
-        //?} else {
-        /*var structureRegistry = world.getRegistryManager().get(Registry.STRUCTURE_KEY);
-        *///?}
+            //? if >=1.21.11 {
+            /*var registry = world.getRegistryManager().getOrThrow(RegistryKeys.STRUCTURE);
+            *///?} else if >=1.20 {
+            var registry = world.getRegistryManager().get(RegistryKeys.STRUCTURE);
+            //?} else {
+            /*var registry = world.getRegistryManager().get(Registry.STRUCTURE_KEY);
+            *///?}
 
-        for (int dx = -radiusChunks; dx <= radiusChunks; dx++) {
-            for (int dz = -radiusChunks; dz <= radiusChunks; dz++) {
-                var chunkPos = new BlockPos(
-                    playerPos.getX() + dx * 16,
-                    playerPos.getY(),
-                    playerPos.getZ() + dz * 16
-                );
-                var chunk = world.getWorldChunk(chunkPos);
-                if (chunk == null) continue;
+            for (var entry : registry.getEntrySet()) {
+                var structure = entry.getValue();
+                var start = accessor.getStructureContaining(playerPos, structure);
+                if (start == null || !start.hasChildren()) continue;
+                if (!start.getBoundingBox().contains(playerPos)) continue;
 
-                for (var entry : chunk.getStructureStarts().entrySet()) {
-                    var start = entry.getValue();
-                    if (start == null || !start.hasChildren()) continue;
-                    var box = start.getBoundingBox();
-                    if (box == null) continue;
-                    if (!box.contains(playerPos)) continue;
-
-                    var id = structureRegistry.getId(entry.getKey());
-                    if (id != null) {
-                        found.add(id.toString().toLowerCase(Locale.ROOT));
-                    }
+                var id = registry.getId(structure);
+                if (id != null) {
+                    found.add(id.toString().toLowerCase(Locale.ROOT));
                 }
             }
+        } catch (Throwable ignored) {
+            // не даём сканированию структур ломать серверный тик
         }
-
         return found;
     }
 
