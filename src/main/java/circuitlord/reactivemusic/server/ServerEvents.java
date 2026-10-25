@@ -176,7 +176,11 @@ public class ServerEvents {
         // Отправка HandshakeResponse — в ветке лоадера.
 
         // Немедленная синхронизация структуры после подтверждения мода.
+        //? if >=1.21.9 {
+        /*ServerWorld world = (ServerWorld) player.getEntityWorld();
+        *///?} else {
         ServerWorld world = (ServerWorld) player.getWorld();
+        //?}
         if (world != null) {
             var current = structureScanner.scan(world, player.getBlockPos(), 1);
             lastPlayerStructures.put(player.getUuid(), current);
@@ -189,7 +193,11 @@ public class ServerEvents {
      * Цели мобов пересчитаются в ближайшем тике (вид строится по новому миру).
      */
     public void onPlayerChangedDimension(ServerPlayerEntity player) {
+        //? if >=1.21.9 {
+        /*ServerWorld world = (ServerWorld) player.getEntityWorld();
+        *///?} else {
         ServerWorld world = (ServerWorld) player.getWorld();
+        //?}
         if (world == null) return;
         var current = structureScanner.scan(world, player.getBlockPos(), 1);
         lastPlayerStructures.put(player.getUuid(), current);
