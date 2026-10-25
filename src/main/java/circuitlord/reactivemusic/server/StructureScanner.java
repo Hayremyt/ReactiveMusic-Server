@@ -7,7 +7,11 @@ import java.util.Locale;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.structure.StructureStart;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.registry.Registry;
+//? if >=1.20 {
+import net.minecraft.registry.RegistryKeys;
+//?} else {
+/*import net.minecraft.util.registry.Registry;
+*///?}
 
 /**
  * Сканирует структуры вокруг позиции игрока на сервере.
@@ -27,7 +31,13 @@ public class StructureScanner {
     public Set<String> scan(ServerWorld world, BlockPos playerPos, int radiusChunks) {
         Set<String> found = new HashSet<>();
 
-        var structureRegistry = world.getRegistryManager().get(Registry.STRUCTURE_KEY);
+        //? if >=1.21.11 {
+        /*var structureRegistry = world.getRegistryManager().getOrThrow(RegistryKeys.STRUCTURE);
+        *///?} else if >=1.20 {
+        var structureRegistry = world.getRegistryManager().get(RegistryKeys.STRUCTURE);
+        //?} else {
+        /*var structureRegistry = world.getRegistryManager().get(Registry.STRUCTURE_KEY);
+        *///?}
 
         for (int dx = -radiusChunks; dx <= radiusChunks; dx++) {
             for (int dz = -radiusChunks; dz <= radiusChunks; dz++) {
@@ -36,7 +46,7 @@ public class StructureScanner {
                     playerPos.getY(),
                     playerPos.getZ() + dz * 16
                 );
-                var chunk = world.getChunkManager().getChunk(chunkPos.getX() >> 4, chunkPos.getZ() >> 4);
+                var chunk = world.getWorldChunk(chunkPos);
                 if (chunk == null) continue;
 
                 for (var entry : chunk.getStructureStarts().entrySet()) {

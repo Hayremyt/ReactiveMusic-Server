@@ -98,7 +98,7 @@ public class ServerEvents {
      * симуляции) и вычисляет дельту относительно прошлого вида этого игрока.
      */
     private void reconcileTargets(MinecraftServer server) {
-        double radius = server.getSimulationDistance() * 16.0; // simulation distance в чанках
+        double radius = server.getPlayerManager().getViewDistance() * 16.0; // view distance в чанках
         double r2 = radius * radius;
 
         for (ServerWorld world : server.getWorlds()) {
@@ -176,7 +176,7 @@ public class ServerEvents {
         // Отправка HandshakeResponse — в ветке лоадера.
 
         // Немедленная синхронизация структуры после подтверждения мода.
-        var world = player.getServerWorld();
+        ServerWorld world = (ServerWorld) player.getWorld();
         if (world != null) {
             var current = structureScanner.scan(world, player.getBlockPos(), 1);
             lastPlayerStructures.put(player.getUuid(), current);
@@ -189,7 +189,7 @@ public class ServerEvents {
      * Цели мобов пересчитаются в ближайшем тике (вид строится по новому миру).
      */
     public void onPlayerChangedDimension(ServerPlayerEntity player) {
-        var world = player.getServerWorld();
+        ServerWorld world = (ServerWorld) player.getWorld();
         if (world == null) return;
         var current = structureScanner.scan(world, player.getBlockPos(), 1);
         lastPlayerStructures.put(player.getUuid(), current);

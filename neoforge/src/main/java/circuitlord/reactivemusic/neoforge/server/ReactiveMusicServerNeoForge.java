@@ -1,21 +1,23 @@
 package circuitlord.reactivemusic.neoforge.server;
 
 import circuitlord.reactivemusic.server.ServerEvents;
-import circuitlord.reactivemusic.server.handshake.HandshakeConstants;
-import circuitlord.reactivemusic.server.handshake.HandshakePackets;
+import net.minecraft.network.RegistryByteBuf;
+import net.minecraft.network.codec.PacketCodec;
+import net.minecraft.network.packet.CustomPayload;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.util.Identifier;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.ModLoadingContext;
 import net.neoforged.fml.common.Mod;
-import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
-import net.neoforged.neoforge.network.NetworkRegistry;
-import net.neoforged.neoforge.network.simple.SimpleChannel;
-import net.neoforged.neoforge.event.TickEvent;
-import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.fml.loading.FMLPaths;
-import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.server.MinecraftServer;
+import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import net.neoforged.neoforge.network.PacketDistributor;
+import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
+import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 import java.util.UUID;
 
@@ -23,240 +25,171 @@ import java.util.UUID;
 public class ReactiveMusicServerNeoForge {
 
     public static ServerEvents serverEvents;
-    public static SimpleChannel channel;
-    public static SimpleChannel targetsChannel;
-    public static SimpleChannel structuresChannel;
-    private static int packetId = 0;
 
     public ReactiveMusicServerNeoForge(IEventBus modEventBus) {
         serverEvents = new ServerEvents();
         serverEvents.getHandshakeManager().configure(
                 FMLPaths.CONFIGDIR.get().resolve("reactivemusic-server").resolve("handshake.properties"));
 
-        channel = NetworkRegistry.ChannelBuilder
-                .named(HandshakeConstants.CHANNEL_ID)
-                .networkProtocolVersion(() -> "1.3.5")
-                .clientAcceptedVersions(s -> true)
-                .serverAcceptedVersions(s -> true)
-                .simpleChannel();
-
-        channel.messageBuilder(HandshakeRequestMessage.class, packetId++)
-                .encoder(HandshakeRequestMessage::encode)
-                .decoder(HandshakeRequestMessage::decode)
-                .consumer(HandshakeRequestMessage::handle)
-                .add();
-
-        channel.messageBuilder(HandshakeResponseMessage.class, packetId++)
-                .encoder(HandshakeResponseMessage::encode)
-                .decoder(HandshakeResponseMessage::decode)
-                .consumer(HandshakeResponseMessage::handle)
-                .add();
-
-        // Канал целей мобов
-        targetsChannel = NetworkRegistry.ChannelBuilder
-                .named(HandshakeConstants.CHANNEL_TARGETS)
-                .networkProtocolVersion(() -> "1.3.5")
-                .clientAcceptedVersions(s -> true)
-                .serverAcceptedVersions(s -> true)
-                .simpleChannel();
-
-        targetsChannel.messageBuilder(MobTargetMessage.class, packetId++)
-                .encoder(MobTargetMessage::encode)
-                .decoder(MobTargetMessage::decode)
-                .consumer(MobTargetMessage::handle)
-                .add();
-
-        // Канал структур
-        structuresChannel = NetworkRegistry.ChannelBuilder
-                .named(HandshakeConstants.CHANNEL_STRUCTURES)
-                .networkProtocolVersion(() -> "1.3.5")
-                .clientAcceptedVersions(s -> true)
-                .serverAcceptedVersions(s -> true)
-                .simpleChannel();
-
-        structuresChannel.messageBuilder(StructureMessage.class, packetId++)
-                .encoder(StructureMessage::encode)
-                .decoder(StructureMessage::decode)
-                .consumer(StructureMessage::handle)
-                .add();
-
-        modEventBus.addListener(this::setup);
-        modEventBus.register(this);
+        modEventBus.addListener(this::registerPayloads);
+        NeoForge.EVENT_BUS.register(this);
     }
 
-    private void setup(FMLCommonSetupEvent event) {
-        event.enqueueWork(() -> {});
+    private void registerPayloads(RegisterPayloadHandlersEvent event) {
+        // optional() — клиенты без этих payload'ов не отключаются (мод опциональный)
+        PayloadRegistrar registrar = event.registrar("1").optional();
+
+        registrar.playToServer(HandshakeRequestPayload.TYPE, HandshakeRequestPayload.CODEC,
+                ReactiveMusicServerNeoForge::handleHandshakeRequest);
+        registrar.playToClient(HandshakeResponsePayload.TYPE, HandshakeResponsePayload.CODEC,
+                ReactiveMusicServerNeoForge::handleNoop);
+        registrar.playToClient(MobTargetPayload.TYPE, MobTargetPayload.CODEC,
+                ReactiveMusicServerNeoForge::handleNoop);
+        registrar.playToClient(StructurePayload.TYPE, StructurePayload.CODEC,
+                ReactiveMusicServerNeoForge::handleNoop);
+    }
+
+    private static void handleNoop(CustomPayload payload, IPayloadContext ctx) {
+        // clientbound payload'ы на сервере не обрабатываются
+    }
+
+    private static void handleHandshakeRequest(HandshakeRequestPayload msg, IPayloadContext ctx) {
+        ctx.enqueueWork(() -> {
+            if (serverEvents == null) return;
+            if (!(ctx.player() instanceof ServerPlayerEntity player)) return;
+            serverEvents.onHandshakeRequest(player);
+            PacketDistributor.sendToPlayer(player, new HandshakeResponsePayload("1.3.5"));
+        });
     }
 
     @SubscribeEvent
-    public void onServerTick(TickEvent.ServerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END) return;
+    public void onServerTick(ServerTickEvent.Post event) {
         if (serverEvents == null) return;
-
-        MinecraftServer server = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
+        MinecraftServer server = event.getServer();
         if (server == null) return;
 
         serverEvents.onServerTick(server);
 
-        for (var player : server.getPlayerList().getPlayers()) {
-            // --- цели мобов (дельта для этого игрока) ---
+        for (var player : server.getPlayerManager().getPlayerList()) {
             var targetUpdates = serverEvents.drainTargetUpdates(player.getUuid());
             if (targetUpdates != null) {
                 for (var update : targetUpdates) {
-                    targetsChannel.send(player, new MobTargetMessage(update.mobUuid, update.targetUuid));
+                    PacketDistributor.sendToPlayer(player, new MobTargetPayload(update.mobUuid, update.targetUuid));
                 }
             }
 
-            // --- структура (если изменилась) ---
             var structures = serverEvents.drainStructureUpdate(player.getUuid());
             if (structures != null) {
-                structuresChannel.send(player, new StructureMessage(structures.toArray(new String[0])));
+                PacketDistributor.sendToPlayer(player, new StructurePayload(structures.toArray(new String[0])));
             }
         }
     }
 
     @SubscribeEvent
     public void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
-        ServerPlayer player = (ServerPlayer) event.getEntity();
-        serverEvents.onPlayerJoin(player);
-    }
-
-    @SubscribeEvent
-    public void onPlayerChangedDimension(PlayerEvent.PlayerChangedDimensionEvent event) {
-        ServerPlayer player = (ServerPlayer) event.getEntity();
-        serverEvents.onPlayerChangedDimension(player);
+        if (serverEvents != null && event.getEntity() instanceof ServerPlayerEntity player) {
+            serverEvents.onPlayerJoin(player);
+        }
     }
 
     @SubscribeEvent
     public void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
-        ServerPlayer player = (ServerPlayer) event.getEntity();
-        serverEvents.onPlayerLeave(player);
+        if (serverEvents != null && event.getEntity() instanceof ServerPlayerEntity player) {
+            serverEvents.onPlayerLeave(player);
+        }
+    }
+
+    @SubscribeEvent
+    public void onPlayerChangedDimension(PlayerEvent.PlayerChangedDimensionEvent event) {
+        if (serverEvents != null && event.getEntity() instanceof ServerPlayerEntity player) {
+            serverEvents.onPlayerChangedDimension(player);
+        }
     }
 
     public static ServerEvents getServerEvents() {
         return serverEvents;
     }
 
-    public static SimpleChannel getChannel() {
-        return channel;
-    }
+    // ---------------- payload'ы ----------------
 
-    public static class HandshakeRequestMessage {
-        public String clientVersion;
+    public record HandshakeRequestPayload(String clientVersion) implements CustomPayload {
+        public static final CustomPayload.Id<HandshakeRequestPayload> TYPE =
+                new CustomPayload.Id<>(Identifier.of("reactivemusic", "server/handshake_request"));
 
-        public HandshakeRequestMessage() {}
+        public static final PacketCodec<RegistryByteBuf, HandshakeRequestPayload> CODEC = PacketCodec.ofStatic(
+                (RegistryByteBuf buf, HandshakeRequestPayload v) -> buf.writeString(v.clientVersion()),
+                buf -> new HandshakeRequestPayload(buf.readString()));
 
-        public HandshakeRequestMessage(String clientVersion) {
-            this.clientVersion = clientVersion;
-        }
-
-        public static void encode(HandshakeRequestMessage msg, FriendlyByteBuf buf) {
-            buf.writeUtf(msg.clientVersion, 255);
-        }
-
-        public static HandshakeRequestMessage decode(FriendlyByteBuf buf) {
-            return new HandshakeRequestMessage(buf.readUtf(255));
-        }
-
-        public static void handle(HandshakeRequestMessage msg, net.neoforged.neoforge.network.NetworkEvent.Context ctx) {
-            ctx.enqueueWork(() -> {
-                ServerPlayer player = ctx.getSender();
-                if (player != null) {
-                    serverEvents.onHandshakeRequest(player);
-                    var response = new HandshakeResponseMessage("1.3.5");
-                    channel.send(player, response);
-                }
-            });
-            ctx.setPacketHandled(true);
+        @Override
+        public CustomPayload.Id<? extends CustomPayload> getId() {
+            return TYPE;
         }
     }
 
-    public static class HandshakeResponseMessage {
-        public String serverVersion;
+    public record HandshakeResponsePayload(String serverVersion) implements CustomPayload {
+        public static final CustomPayload.Id<HandshakeResponsePayload> TYPE =
+                new CustomPayload.Id<>(Identifier.of("reactivemusic", "server/handshake_response"));
 
-        public HandshakeResponseMessage() {}
+        public static final PacketCodec<RegistryByteBuf, HandshakeResponsePayload> CODEC = PacketCodec.ofStatic(
+                (RegistryByteBuf buf, HandshakeResponsePayload v) -> buf.writeString(v.serverVersion()),
+                buf -> new HandshakeResponsePayload(buf.readString()));
 
-        public HandshakeResponseMessage(String serverVersion) {
-            this.serverVersion = serverVersion;
-        }
-
-        public static void encode(HandshakeResponseMessage msg, FriendlyByteBuf buf) {
-            buf.writeUtf(msg.serverVersion, 255);
-        }
-
-        public static HandshakeResponseMessage decode(FriendlyByteBuf buf) {
-            return new HandshakeResponseMessage(buf.readUtf(255));
-        }
-
-        public static void handle(HandshakeResponseMessage msg, net.neoforged.neoforge.network.NetworkEvent.Context ctx) {
-            ctx.setPacketHandled(true);
+        @Override
+        public CustomPayload.Id<? extends CustomPayload> getId() {
+            return TYPE;
         }
     }
 
-    // ---------- MobTargetMessage ----------
+    public record MobTargetPayload(UUID mobUuid, UUID targetUuid) implements CustomPayload {
+        public static final CustomPayload.Id<MobTargetPayload> TYPE =
+                new CustomPayload.Id<>(Identifier.of("reactivemusic", "server/targets"));
 
-    public static class MobTargetMessage {
-        public UUID mobUuid;
-        public UUID targetUuid; // null если цели нет
+        public static final PacketCodec<RegistryByteBuf, MobTargetPayload> CODEC = PacketCodec.ofStatic(
+                (RegistryByteBuf buf, MobTargetPayload v) -> {
+                    buf.writeUuid(v.mobUuid());
+                    if (v.targetUuid() == null) {
+                        buf.writeBoolean(false);
+                    } else {
+                        buf.writeBoolean(true);
+                        buf.writeUuid(v.targetUuid());
+                    }
+                },
+                buf -> {
+                    UUID mob = buf.readUuid();
+                    boolean hasTarget = buf.readBoolean();
+                    UUID target = hasTarget ? buf.readUuid() : null;
+                    return new MobTargetPayload(mob, target);
+                });
 
-        public MobTargetMessage() {}
-
-        public MobTargetMessage(UUID mobUuid, UUID targetUuid) {
-            this.mobUuid = mobUuid;
-            this.targetUuid = targetUuid;
-        }
-
-        public static void encode(MobTargetMessage msg, FriendlyByteBuf buf) {
-            buf.writeUuid(msg.mobUuid);
-            if (msg.targetUuid == null) {
-                buf.writeBoolean(false);
-            } else {
-                buf.writeBoolean(true);
-                buf.writeUuid(msg.targetUuid);
-            }
-        }
-
-        public static MobTargetMessage decode(FriendlyByteBuf buf) {
-            UUID mobUuid = buf.readUuid();
-            boolean hasTarget = buf.readBoolean();
-            UUID targetUuid = hasTarget ? buf.readUuid() : null;
-            return new MobTargetMessage(mobUuid, targetUuid);
-        }
-
-        public static void handle(MobTargetMessage msg, net.neoforged.neoforge.network.NetworkEvent.Context ctx) {
-            ctx.setPacketHandled(true);
+        @Override
+        public CustomPayload.Id<? extends CustomPayload> getId() {
+            return TYPE;
         }
     }
 
-    // ---------- StructureMessage ----------
+    public record StructurePayload(String[] structures) implements CustomPayload {
+        public static final CustomPayload.Id<StructurePayload> TYPE =
+                new CustomPayload.Id<>(Identifier.of("reactivemusic", "server/structures"));
 
-    public static class StructureMessage {
-        public String[] structures;
+        public static final PacketCodec<RegistryByteBuf, StructurePayload> CODEC = PacketCodec.ofStatic(
+                (RegistryByteBuf buf, StructurePayload v) -> {
+                    buf.writeInt(v.structures().length);
+                    for (String s : v.structures()) {
+                        buf.writeString(s);
+                    }
+                },
+                buf -> {
+                    int len = buf.readInt();
+                    String[] arr = new String[len];
+                    for (int i = 0; i < len; i++) {
+                        arr[i] = buf.readString();
+                    }
+                    return new StructurePayload(arr);
+                });
 
-        public StructureMessage() {}
-
-        public StructureMessage(String[] structures) {
-            this.structures = structures;
-        }
-
-        public static void encode(StructureMessage msg, FriendlyByteBuf buf) {
-            buf.writeInt(msg.structures.length);
-            for (var s : msg.structures) {
-                buf.writeUtf(s, 255);
-            }
-        }
-
-        public static StructureMessage decode(FriendlyByteBuf buf) {
-            int len = buf.readInt();
-            var arr = new String[len];
-            for (int i = 0; i < len; i++) {
-                arr[i] = buf.readUtf(255);
-            }
-            return new StructureMessage(arr);
-        }
-
-        public static void handle(StructureMessage msg, net.neoforged.neoforge.network.NetworkEvent.Context ctx) {
-            ctx.setPacketHandled(true);
+        @Override
+        public CustomPayload.Id<? extends CustomPayload> getId() {
+            return TYPE;
         }
     }
 }

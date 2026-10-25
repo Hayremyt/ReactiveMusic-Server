@@ -7,12 +7,11 @@ import circuitlord.reactivemusic.server.handshake.HandshakePackets;
 import net.fabricmc.api.DedicatedServerModInitializer;
 import net.fabricmc.fabric.api.entity.event.v1.ServerEntityWorldChangeEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
-import net.fabricmc.fabric.api.server.network.ServerPlayNetworking;
-import net.fabricmc.fabric.api.server.player.ServerPlayerConnectionEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.network.PacketByteBufs;
-import net.minecraft.server.network.ServerPlayNetworking;
 
 public class ReactiveMusicServerFabric implements DedicatedServerModInitializer {
 
