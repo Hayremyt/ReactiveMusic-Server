@@ -104,13 +104,13 @@ public class ReactiveMusicServerForge {
                 }
             }
 
-            // --- Отправка структур (только если были пересканированы в этом тике) ---
-            if (serverEvents.areStructuresJustUpdated()) {
-                var structures = serverEvents.getLastStructureNames().toArray(new String[0]);
-                for (var player : world.players()) {
-                    if (!serverEvents.canSendStructureData(player)) continue;
-                    structuresChannel.send(player, new StructureMessage(structures));
-                }
+            // --- Отправка структур только тому игроку, у которого структура сменилась ---
+            for (var player : world.players()) {
+                if (!serverEvents.canSendStructureData(player)) continue;
+                UUID playerUuid = player.getUuid();
+                var newStructures = serverEvents.takeStructureChanges(playerUuid);
+                if (newStructures == null) continue;
+                structuresChannel.send(player, new StructureMessage(newStructures.toArray(new String[0])));
             }
         }
     }
@@ -119,6 +119,12 @@ public class ReactiveMusicServerForge {
     public void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
         ServerPlayer player = (ServerPlayer) event.getEntity();
         serverEvents.onPlayerJoin(player);
+    }
+
+    @SubscribeEvent
+    public void onPlayerChangedDimension(PlayerEvent.PlayerChangedDimensionEvent event) {
+        ServerPlayer player = (ServerPlayer) event.getEntity();
+        serverEvents.requestStructureUpdate(player.getUuid());
     }
 
     @SubscribeEvent

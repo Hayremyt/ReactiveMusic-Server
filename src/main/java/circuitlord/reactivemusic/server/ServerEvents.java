@@ -1,14 +1,13 @@
 package circuitlord.reactivemusic.server;
 
 import circuitlord.reactivemusic.server.handshake.HandshakeManager;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -28,18 +27,17 @@ public class ServerEvents {
     /** Изменения целей мобов из последнего тика (моб -> новая цель, null если цели нет). */
     private Map<UUID, UUID> lastTargetChanges = Map.of();
 
-    /** Структуры, найденные при последнем сканировании. */
-    private Set<String> lastStructureNames = new HashSet<>();
+    /** Последние известные структуры для каждого игрока (чтобы слать пакет только при смене). */
+    private final Map<UUID, Set<String>> lastPlayerStructures = new HashMap<>();
 
-    /** Флаг: структуры были пересканированы в этом тике. */
-    private boolean structuresJustUpdated = false;
+    /** Структуры, которые нужно отправить конкретному игроку (ключ -> новое множество). */
+    private final Map<UUID, Set<String>> pendingStructureChanges = new HashMap<>();
+
+    /** Игроки, которым нужнослать структуру принудительно (вход, смена измерения). */
+    private final Set<UUID> playersNeedingStructureUpdate = new HashSet<>();
 
     public TargetTracker getTargetTracker() {
         return targetTracker;
-    }
-
-    public StructureScanner getStructureScanner() {
-        return structureScanner;
     }
 
     public HandshakeManager getHandshakeManager() {
@@ -51,14 +49,20 @@ public class ServerEvents {
         return lastTargetChanges;
     }
 
-    /** Названия структур Around игрока из последнего сканирования. */
-    public Set<String> getLastStructureNames() {
-        return lastStructureNames;
+    /**
+     * Запросить принудительную отправку структуры для игрока (например, при входе или смене измерения).
+     */
+    public void requestStructureUpdate(UUID playerUuid) {
+        playersNeedingStructureUpdate.add(playerUuid);
     }
 
-    /** Были ли структуры пересканированы в последнем тике. */
-    public boolean areStructuresJustUpdated() {
-        return structuresJustUpdated;
+    /**
+     * Возвращает и удаляет новые структуры для игрока, если они изменились с последнего сканирования
+     * (или если запрошено принудительное обновление).
+     * {@code null} если структура не менялась и не запрашивалось принудительное обновление.
+     */
+    public Set<String> takeStructureChanges(UUID playerUuid) {
+        return pendingStructureChanges.remove(playerUuid);
     }
 
     /**
@@ -73,26 +77,33 @@ public class ServerEvents {
         lastTargetChanges = targetTracker.update(world);
         ticksSinceUpdate++;
 
-        structuresJustUpdated = false;
         // Структуры сканируем реже — раз в 100 тиков (5 секунд)
         if (ticksSinceUpdate >= 100) {
             for (var player : world.getPlayers()) {
-                if (handshakeManager.hasClientMod(player.getUuid())) {
-                    structureScanner.scan(world, player.getBlockPos(), 1);
+                if (!handshakeManager.hasClientMod(player.getUuid())) continue;
+
+                boolean forced = playersNeedingStructureUpdate.remove(player.getUuid());
+                var current = structureScanner.scan(world, player.getBlockPos(), 1);
+                var previous = lastPlayerStructures.get(player.getUuid());
+
+                if (forced || !Objects.equals(current, previous)) {
+                    pendingStructureChanges.put(player.getUuid(), current);
                 }
+
+                lastPlayerStructures.put(player.getUuid(), current);
             }
-            lastStructureNames = structureScanner.getStructures();
-            structuresJustUpdated = true;
             ticksSinceUpdate = 0;
         }
     }
 
     /**
      * Игрок зашёл на сервер — ждем HandshakeRequest от клиента.
+     * Также запрашиваем принудительную отправку текущей структуры.
      */
     public void onPlayerJoin(ServerPlayerEntity player) {
         // Рукопожатие инициируется клиентом. Сервер ждет HandshakeRequest
         // и в ответ шлет HandshakeResponse (в сетевом хендлере лоадера).
+        requestStructureUpdate(player.getUuid());
     }
 
     /**
@@ -105,10 +116,13 @@ public class ServerEvents {
     }
 
     /**
-     * Игрок ушёл с сервера — очищаем его из списка рукопожатий.
+     * Игрок ушёл с сервера — очищаем его из списка рукопожатий и структур.
      */
     public void onPlayerLeave(ServerPlayerEntity player) {
         handshakeManager.unregisterClient(player.getUuid());
+        lastPlayerStructures.remove(player.getUuid());
+        pendingStructureChanges.remove(player.getUuid());
+        playersNeedingStructureUpdate.remove(player.getUuid());
     }
 
     /** Можно ли отправлять данные о целях мобов данному игроку. */
@@ -124,11 +138,11 @@ public class ServerEvents {
     /** Полное очищение при выгрузке мира. */
     public void onWorldUnload(ServerWorld world) {
         targetTracker.clear();
-        structureScanner.clear();
         handshakeManager.reset();
         lastTargetChanges = Map.of();
-        lastStructureNames.clear();
-        structuresJustUpdated = false;
+        lastPlayerStructures.clear();
+        pendingStructureChanges.clear();
+        playersNeedingStructureUpdate.clear();
         ticksSinceUpdate = 0;
     }
 }

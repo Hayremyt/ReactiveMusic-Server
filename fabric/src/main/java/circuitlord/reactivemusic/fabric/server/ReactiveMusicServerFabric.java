@@ -6,15 +6,15 @@ import circuitlord.reactivemusic.server.handshake.HandshakeConstants;
 import circuitlord.reactivemusic.server.handshake.HandshakePackets;
 import net.fabricmc.api.DedicatedServerModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerWorldEvents;
 import net.fabricmc.fabric.api.server.network.ServerPlayNetworking;
 import net.fabricmc.fabric.api.server.player.ServerPlayerConnectionEvents;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.network.PacketByteBufs;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayNetworking;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+
+import java.util.UUID;
 
 public class ReactiveMusicServerFabric implements DedicatedServerModInitializer {
 
@@ -58,16 +58,16 @@ public class ReactiveMusicServerFabric implements DedicatedServerModInitializer 
                 }
             }
 
-            // --- Отправка структур (только если были пересканированы в этом тике) ---
-            if (serverEvents.areStructuresJustUpdated()) {
-                var structures = serverEvents.getLastStructureNames().toArray(new String[0]);
-                var packet = new ServerPackets.StructurePacket(structures);
+            // --- Отправка структур только игроку, у которого структура сменилась ---
+            for (var player : server.getPlayerManager().getPlayerList()) {
+                if (!serverEvents.canSendStructureData(player)) continue;
+                UUID playerUuid = player.getUuid();
+                var newStructures = serverEvents.takeStructureChanges(playerUuid);
+                if (newStructures == null) continue;
+                var packet = new ServerPackets.StructurePacket(newStructures.toArray(new String[0]));
                 PacketByteBuf buf = new PacketByteBuf(PacketByteBufs.empty());
                 packet.write(buf);
-                for (var player : server.getPlayerManager().getPlayerList()) {
-                    if (!serverEvents.canSendStructureData(player)) continue;
-                    ServerPlayNetworking.send(player, HandshakeConstants.CHANNEL_STRUCTURES, buf);
-                }
+                ServerPlayNetworking.send(player, HandshakeConstants.CHANNEL_STRUCTURES, buf);
             }
         });
 
