@@ -5,16 +5,14 @@ import circuitlord.reactivemusic.server.ServerPackets;
 import circuitlord.reactivemusic.server.handshake.HandshakeConstants;
 import circuitlord.reactivemusic.server.handshake.HandshakePackets;
 import net.fabricmc.api.DedicatedServerModInitializer;
+import net.fabricmc.fabric.api.entity.event.v1.ServerEntityWorldChangeEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.server.network.ServerPlayNetworking;
 import net.fabricmc.fabric.api.server.player.ServerPlayerConnectionEvents;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.network.PacketByteBufs;
 import net.minecraft.server.network.ServerPlayNetworking;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-
-import java.util.UUID;
 
 public class ReactiveMusicServerFabric implements DedicatedServerModInitializer {
 
@@ -23,8 +21,11 @@ public class ReactiveMusicServerFabric implements DedicatedServerModInitializer 
     @Override
     public void onInitializeServer() {
         serverEvents = new ServerEvents();
+        serverEvents.getHandshakeManager().configure(
+                FabricLoader.getInstance().getConfigDir()
+                        .resolve("reactivemusic-server").resolve("handshake.properties"));
 
-        // Register handshake packet handler
+        // Рукопожатие: клиент -> сервер
         ServerPlayNetworking.registerReceiver(
                 HandshakeConstants.CHANNEL_ID,
                 (server, player, handler, buf, responseSender) -> {
@@ -39,62 +40,42 @@ public class ReactiveMusicServerFabric implements DedicatedServerModInitializer 
                 }
         );
 
-        // Server tick - update targets and structures, then send packets to clients with the mod
+        // Тик: пересчёт per-player состояния и отправка дельт
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             if (serverEvents == null) return;
-            serverEvents.onServerTick(server.getWorld(server.getRegistryKey()));
+            serverEvents.onServerTick(server);
 
-            // --- Отправка изменений целей мобов ---
-            var targetChanges = serverEvents.getLastTargetChanges();
-            if (!targetChanges.isEmpty()) {
-                int simDist = server.getSimulationDistance();
-                double maxDistSq = (double) simDist * simDist;
-                for (var entry : targetChanges.entrySet()) {
-                    UUID mobUuid = entry.getKey();
-                    UUID targetUuid = entry.getValue();
-                    var mobPos = serverEvents.getMobPosition(mobUuid);
-                    for (var player : server.getPlayerManager().getPlayerList()) {
-                        if (!serverEvents.canSendMobTargets(player)) continue;
-
-                        boolean send = false;
-                        // Всегда слать целевому игроку, даже если он далеко
-                        if (targetUuid != null && targetUuid.equals(player.getUuid())) {
-                            send = true;
-                        }
-                        // Иначе слать только игрокам рядом с мобом (в радиусе симуляции сервера)
-                        else if (mobPos != null) {
-                            double distSq = player.squaredDistanceTo(mobPos.getX(), mobPos.getY(), mobPos.getZ());
-                            if (distSq <= maxDistSq) send = true;
-                        }
-                        if (!send) continue;
-
-                        var packet = new ServerPackets.MobTargetPacket(mobUuid, targetUuid);
+            for (var player : server.getPlayerManager().getPlayerList()) {
+                // --- цели мобов (дельта) ---
+                var targetUpdates = serverEvents.drainTargetUpdates(player.getUuid());
+                if (targetUpdates != null) {
+                    for (var update : targetUpdates) {
+                        var packet = new ServerPackets.MobTargetPacket(update.mobUuid, update.targetUuid);
                         PacketByteBuf buf = new PacketByteBuf(PacketByteBufs.empty());
                         packet.write(buf);
                         ServerPlayNetworking.send(player, HandshakeConstants.CHANNEL_TARGETS, buf);
                     }
                 }
-            }
 
-            // --- Отправка структур только игроку, у которого структура сменилась ---
-            for (var player : server.getPlayerManager().getPlayerList()) {
-                if (!serverEvents.canSendStructureData(player)) continue;
-                UUID playerUuid = player.getUuid();
-                var newStructures = serverEvents.takeStructureChanges(playerUuid);
-                if (newStructures == null) continue;
-                var packet = new ServerPackets.StructurePacket(newStructures.toArray(new String[0]));
-                PacketByteBuf buf = new PacketByteBuf(PacketByteBufs.empty());
-                packet.write(buf);
-                ServerPlayNetworking.send(player, HandshakeConstants.CHANNEL_STRUCTURES, buf);
+                // --- структура (если изменилась) ---
+                var structures = serverEvents.drainStructureUpdate(player.getUuid());
+                if (structures != null) {
+                    var packet = new ServerPackets.StructurePacket(structures.toArray(new String[0]));
+                    PacketByteBuf buf = new PacketByteBuf(PacketByteBufs.empty());
+                    packet.write(buf);
+                    ServerPlayNetworking.send(player, HandshakeConstants.CHANNEL_STRUCTURES, buf);
+                }
             }
         });
 
-        // Player join
         ServerPlayerConnectionEvents.JOIN.register((handler, sender, server) -> {
             serverEvents.onPlayerJoin(handler.player);
         });
 
-        // Player disconnect
+        ServerEntityWorldChangeEvents.AFTER_PLAYER_CHANGE_WORLD.register((player, origin, destination) -> {
+            serverEvents.onPlayerChangedDimension(player);
+        });
+
         ServerPlayerConnectionEvents.DISCONNECT.register((handler, server) -> {
             serverEvents.onPlayerLeave(handler.player);
         });

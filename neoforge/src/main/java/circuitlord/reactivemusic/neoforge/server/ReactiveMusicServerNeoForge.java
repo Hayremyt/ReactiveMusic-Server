@@ -12,9 +12,10 @@ import net.neoforged.neoforge.network.NetworkRegistry;
 import net.neoforged.neoforge.network.simple.SimpleChannel;
 import net.neoforged.neoforge.event.TickEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.fml.loading.FMLPaths;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.MinecraftServer;
 
 import java.util.UUID;
 
@@ -29,6 +30,8 @@ public class ReactiveMusicServerNeoForge {
 
     public ReactiveMusicServerNeoForge(IEventBus modEventBus) {
         serverEvents = new ServerEvents();
+        serverEvents.getHandshakeManager().configure(
+                FMLPaths.CONFIGDIR.get().resolve("reactivemusic-server").resolve("handshake.properties"));
 
         channel = NetworkRegistry.ChannelBuilder
                 .named(HandshakeConstants.CHANNEL_ID)
@@ -90,46 +93,24 @@ public class ReactiveMusicServerNeoForge {
         if (event.phase != TickEvent.Phase.END) return;
         if (serverEvents == null) return;
 
-        ServerLevel world = event.getPlayer().getLevel();
-        if (world != null) {
-            serverEvents.onServerTick(world);
+        MinecraftServer server = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
+        if (server == null) return;
 
-            // --- Отправка изменений целей мобов ---
-            var targetChanges = serverEvents.getLastTargetChanges();
-            if (!targetChanges.isEmpty()) {
-                int simDist = world.getServer().getSimulationDistance();
-                double maxDistSq = (double) simDist * simDist;
-                for (var entry : targetChanges.entrySet()) {
-                    UUID mobUuid = entry.getKey();
-                    UUID targetUuid = entry.getValue();
-                    var mobPos = serverEvents.getMobPosition(mobUuid);
-                    for (var player : world.players()) {
-                        if (!serverEvents.canSendMobTargets(player)) continue;
+        serverEvents.onServerTick(server);
 
-                        boolean send = false;
-                        // Всегда слать целевому игроку, даже если он далеко
-                        if (targetUuid != null && targetUuid.equals(player.getUuid())) {
-                            send = true;
-                        }
-                        // Иначе слать только игрокам рядом с мобом (в радиусе симуляции сервера)
-                        else if (mobPos != null) {
-                            double distSq = player.distanceToSqr(mobPos.getX(), mobPos.getY(), mobPos.getZ());
-                            if (distSq <= maxDistSq) send = true;
-                        }
-                        if (!send) continue;
-
-                        targetsChannel.send(player, new MobTargetMessage(mobUuid, targetUuid));
-                    }
+        for (var player : server.getPlayerList().getPlayers()) {
+            // --- цели мобов (дельта для этого игрока) ---
+            var targetUpdates = serverEvents.drainTargetUpdates(player.getUuid());
+            if (targetUpdates != null) {
+                for (var update : targetUpdates) {
+                    targetsChannel.send(player, new MobTargetMessage(update.mobUuid, update.targetUuid));
                 }
             }
 
-            // --- Отправка структур только тому игроку, у которого структура сменилась ---
-            for (var player : world.players()) {
-                if (!serverEvents.canSendStructureData(player)) continue;
-                UUID playerUuid = player.getUuid();
-                var newStructures = serverEvents.takeStructureChanges(playerUuid);
-                if (newStructures == null) continue;
-                structuresChannel.send(player, new StructureMessage(newStructures.toArray(new String[0])));
+            // --- структура (если изменилась) ---
+            var structures = serverEvents.drainStructureUpdate(player.getUuid());
+            if (structures != null) {
+                structuresChannel.send(player, new StructureMessage(structures.toArray(new String[0])));
             }
         }
     }
@@ -143,7 +124,7 @@ public class ReactiveMusicServerNeoForge {
     @SubscribeEvent
     public void onPlayerChangedDimension(PlayerEvent.PlayerChangedDimensionEvent event) {
         ServerPlayer player = (ServerPlayer) event.getEntity();
-        serverEvents.requestStructureUpdate(player.getUuid());
+        serverEvents.onPlayerChangedDimension(player);
     }
 
     @SubscribeEvent

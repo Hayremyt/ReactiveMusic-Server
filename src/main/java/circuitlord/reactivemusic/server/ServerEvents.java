@@ -1,11 +1,16 @@
 package circuitlord.reactivemusic.server;
 
 import circuitlord.reactivemusic.server.handshake.HandshakeManager;
+import net.minecraft.entity.mob.MobEntity;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.math.Box;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -15,139 +20,200 @@ import java.util.UUID;
  * Серверные события: тик, вход/выход игрока, обновление целей и структур.
  * <p>
  * Регистрируется в каждом лоадере (Fabric/Forge/NeoForge) отдельно,
- * так как API событий unterscheidetтся.
+ * так как API событий отличается.
+ * <p>
+ * Данные считаются и хранятся <b>для каждого игрока отдельно</b>:
+ * <ul>
+ *   <li>{@code playerTargetViews} — что каждый игрок уже знает (моб -> цель);</li>
+ *   <li>{@code pendingTargetUpdates} — дельта, которую нужно отправить конкретному игроку;</li>
+ *   <li>{@code lastPlayerStructures} — структура (набор id), в которой находится каждый игрок;</li>
+ *   <li>{@code pendingStructureChanges} — структура, которую нужно отправить конкретному игроку.</li>
+ * </ul>
+ * Моб виден игроку только если он находится в ТОМ ЖЕ измерении и в радиусе симуляции сервера,
+ * поэтому утечки между игроками/мирами нет.
  */
 public class ServerEvents {
 
-    private final TargetTracker targetTracker = new TargetTracker();
     private final StructureScanner structureScanner = new StructureScanner();
     private final HandshakeManager handshakeManager = new HandshakeManager();
     private int ticksSinceUpdate = 0;
 
-    /** Изменения целей мобов из последнего тика (моб -> новая цель, null если цели нет). */
-    private Map<UUID, UUID> lastTargetChanges = Map.of();
+    /** Для каждого игрока: текущий вид целей мобов (UUID моба -> UUID цели). */
+    private final Map<UUID, Map<UUID, UUID>> playerTargetViews = new HashMap<>();
 
-    /** Последние известные структуры для каждого игрока (чтобы слать пакет только при смене). */
+    /** Для каждого игрока: дельта целей, ожидающая отправки (target == null => «забудь моба»). */
+    private final Map<UUID, List<TargetUpdate>> pendingTargetUpdates = new HashMap<>();
+
+    /** Для каждого игрока: последняя известная структура (набор id). */
     private final Map<UUID, Set<String>> lastPlayerStructures = new HashMap<>();
 
-    /** Структуры, которые нужно отправить конкретному игроку (ключ -> новое множество). */
+    /** Для каждого игрока: структура, ожидающая отправки. */
     private final Map<UUID, Set<String>> pendingStructureChanges = new HashMap<>();
 
-    /** Игроки, которым нужнослать структуру принудительно (вход, смена измерения). */
-    private final Set<UUID> playersNeedingStructureUpdate = new HashSet<>();
+    /** Одно обновление цели моба для конкретного игрока. targetUuid == null => забыть моба. */
+    public static final class TargetUpdate {
+        public final UUID mobUuid;
+        public final UUID targetUuid;
 
-    public TargetTracker getTargetTracker() {
-        return targetTracker;
+        public TargetUpdate(UUID mobUuid, UUID targetUuid) {
+            this.mobUuid = mobUuid;
+            this.targetUuid = targetUuid;
+        }
     }
 
     public HandshakeManager getHandshakeManager() {
         return handshakeManager;
     }
 
-    /** Изменения целей мобов из последнего тика. */
-    public Map<UUID, UUID> getLastTargetChanges() {
-        return lastTargetChanges;
+    /** Дельта целей для игрока, ожидающая отправки (или null, если нечего слать). */
+    public List<TargetUpdate> drainTargetUpdates(UUID playerUuid) {
+        return pendingTargetUpdates.remove(playerUuid);
     }
 
-    /** Позиция моба из последнего отслеживания (для отправки пакета цели только ближайшим игрокам). */
-    public net.minecraft.util.math.BlockPos getMobPosition(UUID mobUuid) {
-        return targetTracker.getMobPosition(mobUuid);
-    }
-
-    /**
-     * Запросить принудительную отправку структуры для игрока (например, при входе или смене измерения).
-     */
-    public void requestStructureUpdate(UUID playerUuid) {
-        playersNeedingStructureUpdate.add(playerUuid);
-    }
-
-    /**
-     * Возвращает и удаляет новые структуры для игрока, если они изменились с последнего сканирования
-     * (или если запрошено принудительное обновление).
-     * {@code null} если структура не менялась и не запрашивалось принудительное обновление.
-     */
-    public Set<String> takeStructureChanges(UUID playerUuid) {
+    /** Структура для игрока, ожидающая отправки (или null, если нечего слать). */
+    public Set<String> drainStructureUpdate(UUID playerUuid) {
         return pendingStructureChanges.remove(playerUuid);
     }
 
     /**
      * Вызывается каждый серверный тик.
-     * Обновляет цели мобов и, при необходимости, структуры.
-     * Данные о целях и структурах отправляются только игрокам,
-     * у которых есть клиентский мод (подтверждено через рукопожатие).
+     * Пересчитывает per-player состояние целей и (реже) структур.
      */
-    public void onServerTick(ServerWorld world) {
-        if (targetTracker == null) return;
+    public void onServerTick(MinecraftServer server) {
+        reconcileTargets(server);
 
-        lastTargetChanges = targetTracker.update(world);
         ticksSinceUpdate++;
-
-        // Структуры сканируем реже — раз в 100 тиков (5 секунд)
-        if (ticksSinceUpdate >= 100) {
-            for (var player : world.getPlayers()) {
-                if (!handshakeManager.hasClientMod(player.getUuid())) continue;
-
-                boolean forced = playersNeedingStructureUpdate.remove(player.getUuid());
-                var current = structureScanner.scan(world, player.getBlockPos(), 1);
-                var previous = lastPlayerStructures.get(player.getUuid());
-
-                if (forced || !Objects.equals(current, previous)) {
-                    pendingStructureChanges.put(player.getUuid(), current);
+        if (ticksSinceUpdate >= 100) { // структуры — раз в 5 секунд
+            for (ServerWorld world : server.getWorlds()) {
+                for (var player : world.getPlayers()) {
+                    reconcileStructure(player, world);
                 }
-
-                lastPlayerStructures.put(player.getUuid(), current);
             }
             ticksSinceUpdate = 0;
         }
     }
 
     /**
-     * Игрок зашёл на сервер — ждем HandshakeRequest от клиента.
-     * Также запрашиваем принудительную отправку текущей структуры.
+     * Для каждого игрока с модом строит актуальный вид целей мобов рядом (в его мире, в радиусе
+     * симуляции) и вычисляет дельту относительно прошлого вида этого игрока.
      */
+    private void reconcileTargets(MinecraftServer server) {
+        double radius = server.getSimulationDistance() * 16.0; // simulation distance в чанках
+        double r2 = radius * radius;
+
+        for (ServerWorld world : server.getWorlds()) {
+            for (var player : world.getPlayers()) {
+                UUID playerUuid = player.getUuid();
+                if (!handshakeManager.hasClientMod(playerUuid)) continue;
+
+                double px = player.getX();
+                double py = player.getY();
+                double pz = player.getZ();
+                Box box = new Box(px - radius, py - radius, pz - radius,
+                                  px + radius, py + radius, pz + radius);
+
+                Map<UUID, UUID> newView = new HashMap<>();
+                for (MobEntity mob : world.getEntitiesByClass(MobEntity.class, box, e -> e.isAlive())) {
+                    var target = mob.getTarget();
+                    if (target == null) continue; // моб ни на кого не нацелен — не храним
+                    double dx = mob.getX() - px;
+                    double dy = mob.getY() - py;
+                    double dz = mob.getZ() - pz;
+                    if (dx * dx + dy * dy + dz * dz > r2) continue;
+                    newView.put(mob.getUuid(), target.getUuid());
+                }
+
+                Map<UUID, UUID> oldView = playerTargetViews.getOrDefault(playerUuid, Map.of());
+                List<TargetUpdate> updates = new ArrayList<>();
+
+                // Новые цели и изменения
+                for (var entry : newView.entrySet()) {
+                    UUID mob = entry.getKey();
+                    UUID newTarget = entry.getValue();
+                    if (!Objects.equals(oldView.get(mob), newTarget)) {
+                        updates.add(new TargetUpdate(mob, newTarget));
+                    }
+                }
+                // Мобы, которые выпали из вида (ушли/умерли/перестали целиться) — «забудь»
+                for (var mob : oldView.keySet()) {
+                    if (!newView.containsKey(mob)) {
+                        updates.add(new TargetUpdate(mob, null));
+                    }
+                }
+
+                if (!updates.isEmpty()) {
+                    pendingTargetUpdates.computeIfAbsent(playerUuid, k -> new ArrayList<>()).addAll(updates);
+                }
+                playerTargetViews.put(playerUuid, newView);
+            }
+        }
+    }
+
+    /** Пересчитывает структуру для одного игрока и ставит в очередь, если изменилась. */
+    private void reconcileStructure(ServerPlayerEntity player, ServerWorld world) {
+        UUID playerUuid = player.getUuid();
+        if (!handshakeManager.hasClientMod(playerUuid)) return;
+
+        var current = structureScanner.scan(world, player.getBlockPos(), 1);
+        var previous = lastPlayerStructures.get(playerUuid);
+        if (!Objects.equals(current, previous)) {
+            pendingStructureChanges.put(playerUuid, current);
+        }
+        lastPlayerStructures.put(playerUuid, current);
+    }
+
+    /** Игрок зашёл на сервер — ждём HandshakeRequest. Известных клиентов регистрируем заранее. */
     public void onPlayerJoin(ServerPlayerEntity player) {
-        // Рукопожатие инициируется клиентом. Сервер ждет HandshakeRequest
-        // и в ответ шлет HandshakeResponse (в сетевом хендлере лоадера).
-        requestStructureUpdate(player.getUuid());
+        handshakeManager.markKnownOnJoin(player.getUuid());
     }
 
     /**
-     * Сервер получил HandshakeRequest от клиента — регистрируем игрока
-     * и отправляем HandshakeResponse. Вызывается из сетевого хендлера лоадера.
+     * Клиент прислал HandshakeRequest — регистрируем и сразу синхронизируем структуру
+     * (цели мобов придут в ближайшем тике через reconcileTargets — прошлый вид пуст).
      */
     public void onHandshakeRequest(ServerPlayerEntity player) {
         handshakeManager.registerClient(player.getUuid());
-        // Отправка HandshakeResponse реализуется в ветке лоадера
+        // Отправка HandshakeResponse — в ветке лоадера.
+
+        // Немедленная синхронизация структуры после подтверждения мода.
+        var world = player.getServerWorld();
+        if (world != null) {
+            var current = structureScanner.scan(world, player.getBlockPos(), 1);
+            lastPlayerStructures.put(player.getUuid(), current);
+            pendingStructureChanges.put(player.getUuid(), current);
+        }
     }
 
     /**
-     * Игрок ушёл с сервера — очищаем его из списка рукопожатий и структур.
+     * Игрок сменил измерение — принудительно синхронизируем структуру нового мира.
+     * Цели мобов пересчитаются в ближайшем тике (вид строится по новому миру).
      */
+    public void onPlayerChangedDimension(ServerPlayerEntity player) {
+        var world = player.getServerWorld();
+        if (world == null) return;
+        var current = structureScanner.scan(world, player.getBlockPos(), 1);
+        lastPlayerStructures.put(player.getUuid(), current);
+        pendingStructureChanges.put(player.getUuid(), current);
+        // Сбросить вид целей, чтобы на новом мире ушли все актуальные цели (старые «забудутся»)
+        // — это произойдёт автоматически в reconcileTargets (старый вид не совпадёт с новым).
+    }
+
+    /** Игрок ушёл — чистим всё, что про него хранили. */
     public void onPlayerLeave(ServerPlayerEntity player) {
-        handshakeManager.unregisterClient(player.getUuid());
-        lastPlayerStructures.remove(player.getUuid());
-        pendingStructureChanges.remove(player.getUuid());
-        playersNeedingStructureUpdate.remove(player.getUuid());
+        UUID uuid = player.getUuid();
+        handshakeManager.unregisterClient(uuid);
+        playerTargetViews.remove(uuid);
+        pendingTargetUpdates.remove(uuid);
+        lastPlayerStructures.remove(uuid);
+        pendingStructureChanges.remove(uuid);
     }
 
-    /** Можно ли отправлять данные о целях мобов данному игроку. */
-    public boolean canSendMobTargets(ServerPlayerEntity player) {
-        return handshakeManager.hasClientMod(player.getUuid());
-    }
-
-    /** Можно ли отправлять данные о структурах данному игроку. */
-    public boolean canSendStructureData(ServerPlayerEntity player) {
-        return handshakeManager.hasClientMod(player.getUuid());
-    }
-
-    /** Полное очищение при выгрузке мира. */
+    /** Полное очищение при выгрузке мира. Состояние рукопожатий НЕ трогаем. */
     public void onWorldUnload(ServerWorld world) {
-        targetTracker.clear();
-        handshakeManager.reset();
-        lastTargetChanges = Map.of();
+        playerTargetViews.clear();
+        pendingTargetUpdates.clear();
         lastPlayerStructures.clear();
         pendingStructureChanges.clear();
-        playersNeedingStructureUpdate.clear();
         ticksSinceUpdate = 0;
     }
 }
