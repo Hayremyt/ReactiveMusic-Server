@@ -1,6 +1,7 @@
 package circuitlord.reactivemusic.neoforge.server;
 
 import circuitlord.reactivemusic.server.ServerEvents;
+import circuitlord.reactivemusic.server.handshake.HandshakeConstants;
 import net.minecraft.network.RegistryByteBuf;
 import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.packet.CustomPayload;
@@ -114,7 +115,7 @@ public class ReactiveMusicServerNeoForge {
 
     public record HandshakeRequestPayload(String clientVersion) implements CustomPayload {
         public static final CustomPayload.Id<HandshakeRequestPayload> TYPE =
-                new CustomPayload.Id<>(Identifier.of("reactivemusic", "server/handshake_request"));
+                new CustomPayload.Id<>(Identifier.tryParse(HandshakeConstants.CHANNEL_HANDSHAKE_REQUEST));
 
         public static final PacketCodec<RegistryByteBuf, HandshakeRequestPayload> CODEC = PacketCodec.ofStatic(
                 (RegistryByteBuf buf, HandshakeRequestPayload v) -> buf.writeString(v.clientVersion()),
@@ -128,7 +129,7 @@ public class ReactiveMusicServerNeoForge {
 
     public record HandshakeResponsePayload(String serverVersion) implements CustomPayload {
         public static final CustomPayload.Id<HandshakeResponsePayload> TYPE =
-                new CustomPayload.Id<>(Identifier.of("reactivemusic", "server/handshake_response"));
+                new CustomPayload.Id<>(Identifier.tryParse(HandshakeConstants.CHANNEL_HANDSHAKE_RESPONSE));
 
         public static final PacketCodec<RegistryByteBuf, HandshakeResponsePayload> CODEC = PacketCodec.ofStatic(
                 (RegistryByteBuf buf, HandshakeResponsePayload v) -> buf.writeString(v.serverVersion()),
@@ -142,7 +143,7 @@ public class ReactiveMusicServerNeoForge {
 
     public record MobTargetPayload(UUID mobUuid, UUID targetUuid) implements CustomPayload {
         public static final CustomPayload.Id<MobTargetPayload> TYPE =
-                new CustomPayload.Id<>(Identifier.of("reactivemusic", "server/targets"));
+                new CustomPayload.Id<>(Identifier.tryParse(HandshakeConstants.CHANNEL_TARGETS));
 
         public static final PacketCodec<RegistryByteBuf, MobTargetPayload> CODEC = PacketCodec.ofStatic(
                 (RegistryByteBuf buf, MobTargetPayload v) -> {
@@ -169,7 +170,7 @@ public class ReactiveMusicServerNeoForge {
 
     public record StructurePayload(String[] structures) implements CustomPayload {
         public static final CustomPayload.Id<StructurePayload> TYPE =
-                new CustomPayload.Id<>(Identifier.of("reactivemusic", "server/structures"));
+                new CustomPayload.Id<>(Identifier.tryParse(HandshakeConstants.CHANNEL_STRUCTURES));
 
         public static final PacketCodec<RegistryByteBuf, StructurePayload> CODEC = PacketCodec.ofStatic(
                 (RegistryByteBuf buf, StructurePayload v) -> {

@@ -1,6 +1,7 @@
 package circuitlord.reactivemusic.forge.server;
 
 import circuitlord.reactivemusic.server.ServerEvents;
+import circuitlord.reactivemusic.server.handshake.HandshakeConstants;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -35,7 +36,7 @@ public class ReactiveMusicServerForge {
                 FMLPaths.CONFIGDIR.get().resolve("reactivemusic-server").resolve("handshake.properties"));
 
         handshakeChannel = NetworkRegistry.ChannelBuilder
-                .named(new Identifier("reactivemusic-server", "handshake"))
+                .named(Identifier.tryParse(HandshakeConstants.CHANNEL_ID))
                 .networkProtocolVersion(() -> "1")
                 .clientAcceptedVersions(s -> true)
                 .serverAcceptedVersions(s -> true)
@@ -54,7 +55,7 @@ public class ReactiveMusicServerForge {
                 .add();
 
         targetsChannel = NetworkRegistry.ChannelBuilder
-                .named(new Identifier("reactivemusic-server", "targets"))
+                .named(Identifier.tryParse(HandshakeConstants.CHANNEL_TARGETS))
                 .networkProtocolVersion(() -> "1")
                 .clientAcceptedVersions(s -> true)
                 .serverAcceptedVersions(s -> true)
@@ -67,7 +68,7 @@ public class ReactiveMusicServerForge {
                 .add();
 
         structuresChannel = NetworkRegistry.ChannelBuilder
-                .named(new Identifier("reactivemusic-server", "structures"))
+                .named(Identifier.tryParse(HandshakeConstants.CHANNEL_STRUCTURES))
                 .networkProtocolVersion(() -> "1")
                 .clientAcceptedVersions(s -> true)
                 .serverAcceptedVersions(s -> true)

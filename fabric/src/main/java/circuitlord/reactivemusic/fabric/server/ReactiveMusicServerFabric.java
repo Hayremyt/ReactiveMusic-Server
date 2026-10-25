@@ -1,6 +1,7 @@
 package circuitlord.reactivemusic.fabric.server;
 
 import circuitlord.reactivemusic.server.ServerEvents;
+import circuitlord.reactivemusic.server.handshake.HandshakeConstants;
 import net.fabricmc.api.DedicatedServerModInitializer;
 import net.fabricmc.fabric.api.entity.event.v1.ServerEntityWorldChangeEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -31,13 +32,13 @@ public class ReactiveMusicServerFabric implements DedicatedServerModInitializer 
 
     //? if >=1.20.5 {
     /*private static final CustomPayload.Id<MobTargetPayload> MOB_ID =
-            new CustomPayload.Id<>(Identifier.tryParse("reactivemusic:targets"));
+            new CustomPayload.Id<>(Identifier.tryParse(HandshakeConstants.CHANNEL_TARGETS));
     private static final CustomPayload.Id<StructurePayload> STRUCT_ID =
-            new CustomPayload.Id<>(Identifier.tryParse("reactivemusic:structures"));
+            new CustomPayload.Id<>(Identifier.tryParse(HandshakeConstants.CHANNEL_STRUCTURES));
     *///?} else {
-    private static final Identifier CHANNEL_ID = Identifier.tryParse("reactivemusic:handshake");
-    private static final Identifier CHANNEL_TARGETS = Identifier.tryParse("reactivemusic:targets");
-    private static final Identifier CHANNEL_STRUCTURES = Identifier.tryParse("reactivemusic:structures");
+    private static final Identifier CHANNEL_ID = Identifier.tryParse(HandshakeConstants.CHANNEL_ID);
+    private static final Identifier CHANNEL_TARGETS = Identifier.tryParse(HandshakeConstants.CHANNEL_TARGETS);
+    private static final Identifier CHANNEL_STRUCTURES = Identifier.tryParse(HandshakeConstants.CHANNEL_STRUCTURES);
     //?}
 
     @Override
@@ -133,7 +134,7 @@ public class ReactiveMusicServerFabric implements DedicatedServerModInitializer 
     //? if >=1.20.5 {
     /*public record HandshakeRequestPayload(String clientVersion) implements CustomPayload {
         public static final CustomPayload.Id<HandshakeRequestPayload> TYPE =
-                new CustomPayload.Id<>(Identifier.tryParse("reactivemusic:handshake_request"));
+                new CustomPayload.Id<>(Identifier.tryParse(HandshakeConstants.CHANNEL_HANDSHAKE_REQUEST));
         public static final PacketCodec<RegistryByteBuf, HandshakeRequestPayload> CODEC = PacketCodec.ofStatic(
                 (RegistryByteBuf buf, HandshakeRequestPayload v) -> buf.writeString(v.clientVersion()),
                 buf -> new HandshakeRequestPayload(buf.readString()));
@@ -142,7 +143,7 @@ public class ReactiveMusicServerFabric implements DedicatedServerModInitializer 
 
     public record HandshakeResponsePayload(String serverVersion) implements CustomPayload {
         public static final CustomPayload.Id<HandshakeResponsePayload> TYPE =
-                new CustomPayload.Id<>(Identifier.tryParse("reactivemusic:handshake_response"));
+                new CustomPayload.Id<>(Identifier.tryParse(HandshakeConstants.CHANNEL_HANDSHAKE_RESPONSE));
         public static final PacketCodec<RegistryByteBuf, HandshakeResponsePayload> CODEC = PacketCodec.ofStatic(
                 (RegistryByteBuf buf, HandshakeResponsePayload v) -> buf.writeString(v.serverVersion()),
                 buf -> new HandshakeResponsePayload(buf.readString()));
@@ -151,7 +152,7 @@ public class ReactiveMusicServerFabric implements DedicatedServerModInitializer 
 
     public record MobTargetPayload(UUID mobUuid, UUID targetUuid) implements CustomPayload {
         public static final CustomPayload.Id<MobTargetPayload> TYPE =
-                new CustomPayload.Id<>(Identifier.tryParse("reactivemusic:targets"));
+                new CustomPayload.Id<>(Identifier.tryParse(HandshakeConstants.CHANNEL_TARGETS));
         public static final PacketCodec<RegistryByteBuf, MobTargetPayload> CODEC = PacketCodec.ofStatic(
                 (RegistryByteBuf buf, MobTargetPayload v) -> {
                     buf.writeUuid(v.mobUuid());
@@ -169,7 +170,7 @@ public class ReactiveMusicServerFabric implements DedicatedServerModInitializer 
 
     public record StructurePayload(String[] structures) implements CustomPayload {
         public static final CustomPayload.Id<StructurePayload> TYPE =
-                new CustomPayload.Id<>(Identifier.tryParse("reactivemusic:structures"));
+                new CustomPayload.Id<>(Identifier.tryParse(HandshakeConstants.CHANNEL_STRUCTURES));
         public static final PacketCodec<RegistryByteBuf, StructurePayload> CODEC = PacketCodec.ofStatic(
                 (RegistryByteBuf buf, StructurePayload v) -> {
                     buf.writeInt(v.structures().length);
