@@ -1,6 +1,7 @@
 package circuitlord.reactivemusic.fabric.server;
 
 import circuitlord.reactivemusic.server.ServerEvents;
+import circuitlord.reactivemusic.server.MobTargetStatus;
 import circuitlord.reactivemusic.server.handshake.HandshakeConstants;
 import net.fabricmc.api.DedicatedServerModInitializer;
 import net.fabricmc.fabric.api.entity.event.v1.ServerEntityWorldChangeEvents;
@@ -83,7 +84,7 @@ public class ReactiveMusicServerFabric implements DedicatedServerModInitializer 
                 var targetUpdates = serverEvents.drainTargetUpdates(player.getUuid());
                 if (targetUpdates != null) {
                     for (var update : targetUpdates) {
-                        sendMobTarget(player, update.mobUuid, update.targetUuid);
+                        sendMobTarget(player, update.mobUuid, update.status);
                     }
                 }
 
@@ -107,12 +108,12 @@ public class ReactiveMusicServerFabric implements DedicatedServerModInitializer 
         });
     }
 
-    private static void sendMobTarget(ServerPlayerEntity player, java.util.UUID mobUuid, java.util.UUID targetUuid) {
+    private static void sendMobTarget(ServerPlayerEntity player, java.util.UUID mobUuid, MobTargetStatus status) {
         //? if >=1.20.5 {
-        /*ServerPlayNetworking.send(player, new MobTargetPayload(mobUuid, targetUuid));
+        /*ServerPlayNetworking.send(player, new MobTargetPayload(mobUuid, status));
         *///?} else {
         PacketByteBuf buf = PacketByteBufs.create();
-        new ServerPackets.MobTargetPacket(mobUuid, targetUuid).write(buf);
+        new ServerPackets.MobTargetPacket(mobUuid, status).write(buf);
         ServerPlayNetworking.send(player, CHANNEL_TARGETS, buf);
         //?}
     }
@@ -150,21 +151,15 @@ public class ReactiveMusicServerFabric implements DedicatedServerModInitializer 
         @Override public CustomPayload.Id<? extends CustomPayload> getId() { return TYPE; }
     }
 
-    public record MobTargetPayload(UUID mobUuid, UUID targetUuid) implements CustomPayload {
+    public record MobTargetPayload(UUID mobUuid, MobTargetStatus status) implements CustomPayload {
         public static final CustomPayload.Id<MobTargetPayload> TYPE =
                 new CustomPayload.Id<>(Identifier.tryParse(HandshakeConstants.CHANNEL_TARGETS));
         public static final PacketCodec<RegistryByteBuf, MobTargetPayload> CODEC = PacketCodec.ofStatic(
                 (RegistryByteBuf buf, MobTargetPayload v) -> {
                     buf.writeUuid(v.mobUuid());
-                    if (v.targetUuid() == null) buf.writeBoolean(false);
-                    else { buf.writeBoolean(true); buf.writeUuid(v.targetUuid()); }
+                    buf.writeByte(v.status().ordinal());
                 },
-                buf -> {
-                    UUID mob = buf.readUuid();
-                    boolean has = buf.readBoolean();
-                    UUID target = has ? buf.readUuid() : null;
-                    return new MobTargetPayload(mob, target);
-                });
+                buf -> new MobTargetPayload(buf.readUuid(), MobTargetStatus.byOrdinal(buf.readByte())));
         @Override public CustomPayload.Id<? extends CustomPayload> getId() { return TYPE; }
     }
 

@@ -38,10 +38,10 @@ public class ServerEvents {
     private final HandshakeManager handshakeManager = new HandshakeManager();
     private int ticksSinceUpdate = 0;
 
-    /** Для каждого игрока: текущий вид целей мобов (UUID моба -> UUID цели). */
-    private final Map<UUID, Map<UUID, UUID>> playerTargetViews = new HashMap<>();
+    /** Для каждого игрока: текущий вид (UUID моба -> статус цели относительно игрока). */
+    private final Map<UUID, Map<UUID, MobTargetStatus>> playerTargetViews = new HashMap<>();
 
-    /** Для каждого игрока: дельта целей, ожидающая отправки (target == null => «забудь моба»). */
+    /** Для каждого игрока: дельта статусов, ожидающая отправки (status NONE => «забудь моба»). */
     private final Map<UUID, List<TargetUpdate>> pendingTargetUpdates = new HashMap<>();
 
     /** Для каждого игрока: последняя известная структура (набор id). */
@@ -50,14 +50,14 @@ public class ServerEvents {
     /** Для каждого игрока: структура, ожидающая отправки. */
     private final Map<UUID, Set<String>> pendingStructureChanges = new HashMap<>();
 
-    /** Одно обновление цели моба для конкретного игрока. targetUuid == null => забыть моба. */
+    /** Одно обновление статуса цели моба для конкретного игрока. status NONE => забыть моба. */
     public static final class TargetUpdate {
         public final UUID mobUuid;
-        public final UUID targetUuid;
+        public final MobTargetStatus status;
 
-        public TargetUpdate(UUID mobUuid, UUID targetUuid) {
+        public TargetUpdate(UUID mobUuid, MobTargetStatus status) {
             this.mobUuid = mobUuid;
-            this.targetUuid = targetUuid;
+            this.status = status;
         }
     }
 
@@ -112,32 +112,34 @@ public class ServerEvents {
                 Box box = new Box(px - radius, py - radius, pz - radius,
                                   px + radius, py + radius, pz + radius);
 
-                Map<UUID, UUID> newView = new HashMap<>();
+                Map<UUID, MobTargetStatus> newView = new HashMap<>();
                 for (MobEntity mob : world.getEntitiesByClass(MobEntity.class, box, e -> e.isAlive())) {
-                    var target = mob.getTarget();
+                    var target = getMobTarget(mob);
                     if (target == null) continue; // моб ни на кого не нацелен — не храним
                     double dx = mob.getX() - px;
                     double dy = mob.getY() - py;
                     double dz = mob.getZ() - pz;
                     if (dx * dx + dy * dy + dz * dz > r2) continue;
-                    newView.put(mob.getUuid(), target.getUuid());
+                    MobTargetStatus status = target.getUuid().equals(playerUuid)
+                            ? MobTargetStatus.ME : MobTargetStatus.OTHER;
+                    newView.put(mob.getUuid(), status);
                 }
 
-                Map<UUID, UUID> oldView = playerTargetViews.getOrDefault(playerUuid, Map.of());
+                Map<UUID, MobTargetStatus> oldView = playerTargetViews.getOrDefault(playerUuid, Map.of());
                 List<TargetUpdate> updates = new ArrayList<>();
 
-                // Новые цели и изменения
+                // Новые/изменённые статусы
                 for (var entry : newView.entrySet()) {
                     UUID mob = entry.getKey();
-                    UUID newTarget = entry.getValue();
-                    if (!Objects.equals(oldView.get(mob), newTarget)) {
-                        updates.add(new TargetUpdate(mob, newTarget));
+                    MobTargetStatus newStatus = entry.getValue();
+                    if (oldView.get(mob) != newStatus) {
+                        updates.add(new TargetUpdate(mob, newStatus));
                     }
                 }
                 // Мобы, которые выпали из вида (ушли/умерли/перестали целиться) — «забудь»
                 for (var mob : oldView.keySet()) {
                     if (!newView.containsKey(mob)) {
-                        updates.add(new TargetUpdate(mob, null));
+                        updates.add(new TargetUpdate(mob, MobTargetStatus.NONE));
                     }
                 }
 
@@ -147,6 +149,35 @@ public class ServerEvents {
                 playerTargetViews.put(playerUuid, newView);
             }
         }
+    }
+
+    /**
+     * Цель моба: сначала обычный getTarget(), затем (для brain-мобов — warden/piglin и т.п.)
+     * память ATTACK_TARGET через reflection. Возвращает null, если цели нет.
+     */
+    private static net.minecraft.entity.LivingEntity getMobTarget(MobEntity mob) {
+        var direct = mob.getTarget();
+        if (direct != null) return direct;
+        try {
+            var getBrain = mob.getClass().getMethod("getBrain");
+            Object brain = getBrain.invoke(mob);
+            if (brain == null) return null;
+            Class<?> memoryTypeClass = Class.forName("net.minecraft.entity.ai.brain.MemoryModuleType");
+            Object attackTarget = memoryTypeClass.getField("ATTACK_TARGET").get(null);
+            for (var m : brain.getClass().getMethods()) {
+                if (!m.getName().startsWith("get") || m.getParameterCount() != 1) continue;
+                if (!m.getParameterTypes()[0].getName().contains("MemoryModuleType")) continue;
+                if (!java.util.Optional.class.isAssignableFrom(m.getReturnType())) continue;
+                Object opt = m.invoke(brain, attackTarget);
+                if (opt instanceof java.util.Optional<?> o && o.isPresent()
+                        && o.get() instanceof net.minecraft.entity.LivingEntity living) {
+                    return living;
+                }
+            }
+        } catch (Throwable ignored) {
+            // brain недоступен/изменился между версиями — просто нет данных
+        }
+        return null;
     }
 
     /** Пересчитывает структуру для одного игрока и ставит в очередь, если изменилась. */

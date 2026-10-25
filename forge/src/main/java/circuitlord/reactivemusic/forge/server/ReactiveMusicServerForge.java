@@ -1,6 +1,7 @@
 package circuitlord.reactivemusic.forge.server;
 
 import circuitlord.reactivemusic.server.ServerEvents;
+import circuitlord.reactivemusic.server.MobTargetStatus;
 import circuitlord.reactivemusic.server.handshake.HandshakeConstants;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.server.MinecraftServer;
@@ -98,7 +99,7 @@ public class ReactiveMusicServerForge {
             var targetUpdates = serverEvents.drainTargetUpdates(player.getUuid());
             if (targetUpdates != null) {
                 for (var update : targetUpdates) {
-                    sendTarget(player, new MobTargetMessage(update.mobUuid, update.targetUuid));
+                    sendTarget(player, new MobTargetMessage(update.mobUuid, update.status));
                 }
             }
 
@@ -198,30 +199,24 @@ public class ReactiveMusicServerForge {
 
     public static class MobTargetMessage {
         public UUID mobUuid;
-        public UUID targetUuid; // null если цели нет
+        public MobTargetStatus status;
 
         public MobTargetMessage() {}
 
-        public MobTargetMessage(UUID mobUuid, UUID targetUuid) {
+        public MobTargetMessage(UUID mobUuid, MobTargetStatus status) {
             this.mobUuid = mobUuid;
-            this.targetUuid = targetUuid;
+            this.status = status;
         }
 
         public static void encode(MobTargetMessage msg, PacketByteBuf buf) {
             buf.writeUuid(msg.mobUuid);
-            if (msg.targetUuid == null) {
-                buf.writeBoolean(false);
-            } else {
-                buf.writeBoolean(true);
-                buf.writeUuid(msg.targetUuid);
-            }
+            buf.writeByte(msg.status.ordinal());
         }
 
         public static MobTargetMessage decode(PacketByteBuf buf) {
             UUID mobUuid = buf.readUuid();
-            boolean hasTarget = buf.readBoolean();
-            UUID targetUuid = hasTarget ? buf.readUuid() : null;
-            return new MobTargetMessage(mobUuid, targetUuid);
+            MobTargetStatus status = MobTargetStatus.byOrdinal(buf.readByte());
+            return new MobTargetMessage(mobUuid, status);
         }
 
         public static void handle(MobTargetMessage msg, Supplier<NetworkEvent.Context> supplier) {
