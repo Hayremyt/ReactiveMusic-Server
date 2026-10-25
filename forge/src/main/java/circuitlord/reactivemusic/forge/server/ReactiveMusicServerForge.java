@@ -1,29 +1,30 @@
 package circuitlord.reactivemusic.forge.server;
 
 import circuitlord.reactivemusic.server.ServerEvents;
-import circuitlord.reactivemusic.server.handshake.HandshakeConstants;
-import circuitlord.reactivemusic.server.handshake.HandshakePackets;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
-import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraft.network.PacketByteBuf;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.util.Identifier;
+import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
-import net.minecraftforge.network.NetworkRegistry;
-import net.minecraftforge.network.simple.SimpleChannel;
-import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.server.MinecraftServer;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.fml.loading.FMLPaths;
-import net.minecraftforge.server.ServerLifecycleHooks;
+import net.minecraftforge.network.NetworkEvent;
+import net.minecraftforge.network.NetworkRegistry;
+import net.minecraftforge.network.PacketDistributor;
+import net.minecraftforge.network.simple.SimpleChannel;
 
 import java.util.UUID;
+import java.util.function.Supplier;
 
 @Mod("reactivemusic-server")
 public class ReactiveMusicServerForge {
 
     public static ServerEvents serverEvents;
-    public static SimpleChannel channel;
+    public static SimpleChannel handshakeChannel;
     public static SimpleChannel targetsChannel;
     public static SimpleChannel structuresChannel;
     private static int packetId = 0;
@@ -33,29 +34,28 @@ public class ReactiveMusicServerForge {
         serverEvents.getHandshakeManager().configure(
                 FMLPaths.CONFIGDIR.get().resolve("reactivemusic-server").resolve("handshake.properties"));
 
-        channel = NetworkRegistry.ChannelBuilder
-                .named(HandshakeConstants.CHANNEL_ID)
-                .networkProtocolVersion(() -> "1.3.5")
+        handshakeChannel = NetworkRegistry.ChannelBuilder
+                .named(new Identifier("reactivemusic-server", "handshake"))
+                .networkProtocolVersion(() -> "1")
                 .clientAcceptedVersions(s -> true)
                 .serverAcceptedVersions(s -> true)
                 .simpleChannel();
 
-        channel.messageBuilder(HandshakeRequestMessage.class, packetId++)
+        handshakeChannel.messageBuilder(HandshakeRequestMessage.class, packetId++)
                 .encoder(HandshakeRequestMessage::encode)
                 .decoder(HandshakeRequestMessage::decode)
-                .consumer(HandshakeRequestMessage::handle)
+                .consumerMainThread(HandshakeRequestMessage::handle)
                 .add();
 
-        channel.messageBuilder(HandshakeResponseMessage.class, packetId++)
+        handshakeChannel.messageBuilder(HandshakeResponseMessage.class, packetId++)
                 .encoder(HandshakeResponseMessage::encode)
                 .decoder(HandshakeResponseMessage::decode)
-                .consumer(HandshakeResponseMessage::handle)
+                .consumerMainThread(HandshakeResponseMessage::handle)
                 .add();
 
-        // Канал целей мобов
         targetsChannel = NetworkRegistry.ChannelBuilder
-                .named(HandshakeConstants.CHANNEL_TARGETS)
-                .networkProtocolVersion(() -> "1.3.5")
+                .named(new Identifier("reactivemusic-server", "targets"))
+                .networkProtocolVersion(() -> "1")
                 .clientAcceptedVersions(s -> true)
                 .serverAcceptedVersions(s -> true)
                 .simpleChannel();
@@ -63,13 +63,12 @@ public class ReactiveMusicServerForge {
         targetsChannel.messageBuilder(MobTargetMessage.class, packetId++)
                 .encoder(MobTargetMessage::encode)
                 .decoder(MobTargetMessage::decode)
-                .consumer(MobTargetMessage::handle)
+                .consumerMainThread(MobTargetMessage::handle)
                 .add();
 
-        // Канал структур
         structuresChannel = NetworkRegistry.ChannelBuilder
-                .named(HandshakeConstants.CHANNEL_STRUCTURES)
-                .networkProtocolVersion(() -> "1.3.5")
+                .named(new Identifier("reactivemusic-server", "structures"))
+                .networkProtocolVersion(() -> "1")
                 .clientAcceptedVersions(s -> true)
                 .serverAcceptedVersions(s -> true)
                 .simpleChannel();
@@ -77,15 +76,11 @@ public class ReactiveMusicServerForge {
         structuresChannel.messageBuilder(StructureMessage.class, packetId++)
                 .encoder(StructureMessage::encode)
                 .decoder(StructureMessage::decode)
-                .consumer(StructureMessage::handle)
+                .consumerMainThread(StructureMessage::handle)
                 .add();
 
-        FMLJavaModLoadingContext.get().getModEventBus().addListener(this::setup);
+        MinecraftForge.EVENT_BUS.register(this);
         FMLJavaModLoadingContext.get().getModEventBus().register(this);
-    }
-
-    private void setup(FMLCommonSetupEvent event) {
-        event.enqueueWork(() -> {});
     }
 
     @SubscribeEvent
@@ -93,53 +88,60 @@ public class ReactiveMusicServerForge {
         if (event.phase != TickEvent.Phase.END) return;
         if (serverEvents == null) return;
 
-        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+        MinecraftServer server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
         if (server == null) return;
 
         serverEvents.onServerTick(server);
 
-        for (var player : server.getPlayerList().getPlayers()) {
-            // --- цели мобов (дельта для этого игрока) ---
+        for (var player : server.getPlayerManager().getPlayerList()) {
             var targetUpdates = serverEvents.drainTargetUpdates(player.getUuid());
             if (targetUpdates != null) {
                 for (var update : targetUpdates) {
-                    targetsChannel.send(player, new MobTargetMessage(update.mobUuid, update.targetUuid));
+                    sendTarget(player, new MobTargetMessage(update.mobUuid, update.targetUuid));
                 }
             }
 
-            // --- структура (если изменилась) ---
             var structures = serverEvents.drainStructureUpdate(player.getUuid());
             if (structures != null) {
-                structuresChannel.send(player, new StructureMessage(structures.toArray(new String[0])));
+                sendStructures(player, new StructureMessage(structures.toArray(new String[0])));
             }
         }
     }
 
     @SubscribeEvent
     public void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
-        ServerPlayer player = (ServerPlayer) event.getEntity();
-        serverEvents.onPlayerJoin(player);
-    }
-
-    @SubscribeEvent
-    public void onPlayerChangedDimension(PlayerEvent.PlayerChangedDimensionEvent event) {
-        ServerPlayer player = (ServerPlayer) event.getEntity();
-        serverEvents.onPlayerChangedDimension(player);
+        if (serverEvents != null && event.getEntity() instanceof ServerPlayerEntity player) {
+            serverEvents.onPlayerJoin(player);
+        }
     }
 
     @SubscribeEvent
     public void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
-        ServerPlayer player = (ServerPlayer) event.getEntity();
-        serverEvents.onPlayerLeave(player);
+        if (serverEvents != null && event.getEntity() instanceof ServerPlayerEntity player) {
+            serverEvents.onPlayerLeave(player);
+        }
+    }
+
+    @SubscribeEvent
+    public void onPlayerChangedDimension(PlayerEvent.PlayerChangedDimensionEvent event) {
+        if (serverEvents != null && event.getEntity() instanceof ServerPlayerEntity player) {
+            serverEvents.onPlayerChangedDimension(player);
+        }
+    }
+
+    static void sendTarget(ServerPlayerEntity player, MobTargetMessage msg) {
+        targetsChannel.send(PacketDistributor.PLAYER.with(() -> player), msg);
+    }
+
+    static void sendStructures(ServerPlayerEntity player, StructureMessage msg) {
+        structuresChannel.send(PacketDistributor.PLAYER.with(() -> player), msg);
     }
 
     public static ServerEvents getServerEvents() {
         return serverEvents;
     }
 
-    public static SimpleChannel getChannel() {
-        return channel;
-    }
+    // ---------------- сообщения ----------------
 
     public static class HandshakeRequestMessage {
         public String clientVersion;
@@ -150,22 +152,22 @@ public class ReactiveMusicServerForge {
             this.clientVersion = clientVersion;
         }
 
-        public static void encode(HandshakeRequestMessage msg, FriendlyByteBuf buf) {
-            buf.writeUtf(msg.clientVersion, 255);
+        public static void encode(HandshakeRequestMessage msg, PacketByteBuf buf) {
+            buf.writeString(msg.clientVersion);
         }
 
-        public static HandshakeRequestMessage decode(FriendlyByteBuf buf) {
-            return new HandshakeRequestMessage(buf.readUtf(255));
+        public static HandshakeRequestMessage decode(PacketByteBuf buf) {
+            return new HandshakeRequestMessage(buf.readString());
         }
 
-        public static void handle(HandshakeRequestMessage msg, net.minecraftforge.network.NetworkEvent.Context ctx) {
+        public static void handle(HandshakeRequestMessage msg, Supplier<NetworkEvent.Context> supplier) {
+            NetworkEvent.Context ctx = supplier.get();
             ctx.enqueueWork(() -> {
-                ServerPlayer player = ctx.getSender();
-                if (player != null) {
-                    serverEvents.onHandshakeRequest(player);
-                    var response = new HandshakeResponseMessage("1.3.5");
-                    channel.send(player, response);
-                }
+                ServerPlayerEntity player = ctx.getSender();
+                if (player == null || serverEvents == null) return;
+                serverEvents.onHandshakeRequest(player);
+                handshakeChannel.send(PacketDistributor.PLAYER.with(() -> player),
+                        new HandshakeResponseMessage("1.3.5"));
             });
             ctx.setPacketHandled(true);
         }
@@ -180,20 +182,18 @@ public class ReactiveMusicServerForge {
             this.serverVersion = serverVersion;
         }
 
-        public static void encode(HandshakeResponseMessage msg, FriendlyByteBuf buf) {
-            buf.writeUtf(msg.serverVersion, 255);
+        public static void encode(HandshakeResponseMessage msg, PacketByteBuf buf) {
+            buf.writeString(msg.serverVersion);
         }
 
-        public static HandshakeResponseMessage decode(FriendlyByteBuf buf) {
-            return new HandshakeResponseMessage(buf.readUtf(255));
+        public static HandshakeResponseMessage decode(PacketByteBuf buf) {
+            return new HandshakeResponseMessage(buf.readString());
         }
 
-        public static void handle(HandshakeResponseMessage msg, net.minecraftforge.network.NetworkEvent.Context ctx) {
-            ctx.setPacketHandled(true);
+        public static void handle(HandshakeResponseMessage msg, Supplier<NetworkEvent.Context> supplier) {
+            supplier.get().setPacketHandled(true);
         }
     }
-
-    // ---------- MobTargetMessage ----------
 
     public static class MobTargetMessage {
         public UUID mobUuid;
@@ -206,7 +206,7 @@ public class ReactiveMusicServerForge {
             this.targetUuid = targetUuid;
         }
 
-        public static void encode(MobTargetMessage msg, FriendlyByteBuf buf) {
+        public static void encode(MobTargetMessage msg, PacketByteBuf buf) {
             buf.writeUuid(msg.mobUuid);
             if (msg.targetUuid == null) {
                 buf.writeBoolean(false);
@@ -216,19 +216,17 @@ public class ReactiveMusicServerForge {
             }
         }
 
-        public static MobTargetMessage decode(FriendlyByteBuf buf) {
+        public static MobTargetMessage decode(PacketByteBuf buf) {
             UUID mobUuid = buf.readUuid();
             boolean hasTarget = buf.readBoolean();
             UUID targetUuid = hasTarget ? buf.readUuid() : null;
             return new MobTargetMessage(mobUuid, targetUuid);
         }
 
-        public static void handle(MobTargetMessage msg, net.minecraftforge.network.NetworkEvent.Context ctx) {
-            ctx.setPacketHandled(true);
+        public static void handle(MobTargetMessage msg, Supplier<NetworkEvent.Context> supplier) {
+            supplier.get().setPacketHandled(true);
         }
     }
-
-    // ---------- StructureMessage ----------
 
     public static class StructureMessage {
         public String[] structures;
@@ -239,24 +237,24 @@ public class ReactiveMusicServerForge {
             this.structures = structures;
         }
 
-        public static void encode(StructureMessage msg, FriendlyByteBuf buf) {
+        public static void encode(StructureMessage msg, PacketByteBuf buf) {
             buf.writeInt(msg.structures.length);
-            for (var s : msg.structures) {
-                buf.writeUtf(s, 255);
+            for (String s : msg.structures) {
+                buf.writeString(s);
             }
         }
 
-        public static StructureMessage decode(FriendlyByteBuf buf) {
+        public static StructureMessage decode(PacketByteBuf buf) {
             int len = buf.readInt();
-            var arr = new String[len];
+            String[] arr = new String[len];
             for (int i = 0; i < len; i++) {
-                arr[i] = buf.readUtf(255);
+                arr[i] = buf.readString();
             }
             return new StructureMessage(arr);
         }
 
-        public static void handle(StructureMessage msg, net.minecraftforge.network.NetworkEvent.Context ctx) {
-            ctx.setPacketHandled(true);
+        public static void handle(StructureMessage msg, Supplier<NetworkEvent.Context> supplier) {
+            supplier.get().setPacketHandled(true);
         }
     }
 }
