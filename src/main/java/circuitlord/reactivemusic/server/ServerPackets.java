@@ -3,7 +3,6 @@ package circuitlord.reactivemusic.server;
 import java.util.UUID;
 
 import net.minecraft.network.PacketByteBuf;
-import net.minecraft.server.network.ServerPlayerEntity;
 
 /**
  * Описание сетевых пакетов серверной части.
@@ -67,17 +66,5 @@ public class ServerPackets {
         }
     }
 
-    /**
-     * Отправить клиенту обновление цели одного моба.
-     * Реализуется в лоадер-специфичном коде.
-     */
-    public static void sendMobTarget(ServerPlayerEntity player, MobTargetPacket packet) {
-        // Заглушка — переопределяется в лоадер- branche
-        throw new UnsupportedOperationException("Loader-specific implementation required");
-    }
-
-    /** Отправить клиенту список структур. */
-    public static void sendStructures(ServerPlayerEntity player, StructurePacket packet) {
-        throw new UnsupportedOperationException("Loader-specific implementation required");
-    }
+    private ServerPackets() {}
 }

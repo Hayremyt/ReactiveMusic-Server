@@ -1,6 +1,7 @@
 package circuitlord.reactivemusic.fabric.server;
 
 import circuitlord.reactivemusic.server.ServerEvents;
+import circuitlord.reactivemusic.server.ServerPackets;
 import circuitlord.reactivemusic.server.handshake.HandshakeConstants;
 import circuitlord.reactivemusic.server.handshake.HandshakePackets;
 import net.fabricmc.api.DedicatedServerModInitializer;
@@ -38,10 +39,36 @@ public class ReactiveMusicServerFabric implements DedicatedServerModInitializer 
                 }
         );
 
-        // Server tick - update targets and structures
+        // Server tick - update targets and structures, then send packets to clients with the mod
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             if (serverEvents == null) return;
             serverEvents.onServerTick(server.getWorld(server.getRegistryKey()));
+
+            // --- Отправка изменений целей мобов ---
+            var targetChanges = serverEvents.getLastTargetChanges();
+            if (!targetChanges.isEmpty()) {
+                for (var player : server.getPlayerManager().getPlayerList()) {
+                    if (!serverEvents.canSendMobTargets(player)) continue;
+                    for (var entry : targetChanges.entrySet()) {
+                        var packet = new ServerPackets.MobTargetPacket(entry.getKey(), entry.getValue());
+                        PacketByteBuf buf = new PacketByteBuf(PacketByteBufs.empty());
+                        packet.write(buf);
+                        ServerPlayNetworking.send(player, HandshakeConstants.CHANNEL_TARGETS, buf);
+                    }
+                }
+            }
+
+            // --- Отправка структур (только если были пересканированы в этом тике) ---
+            if (serverEvents.areStructuresJustUpdated()) {
+                var structures = serverEvents.getLastStructureNames().toArray(new String[0]);
+                var packet = new ServerPackets.StructurePacket(structures);
+                PacketByteBuf buf = new PacketByteBuf(PacketByteBufs.empty());
+                packet.write(buf);
+                for (var player : server.getPlayerManager().getPlayerList()) {
+                    if (!serverEvents.canSendStructureData(player)) continue;
+                    ServerPlayNetworking.send(player, HandshakeConstants.CHANNEL_STRUCTURES, buf);
+                }
+            }
         });
 
         // Player join

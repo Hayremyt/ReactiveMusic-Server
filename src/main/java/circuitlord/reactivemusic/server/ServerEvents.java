@@ -7,6 +7,9 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -22,6 +25,15 @@ public class ServerEvents {
     private final HandshakeManager handshakeManager = new HandshakeManager();
     private int ticksSinceUpdate = 0;
 
+    /** Изменения целей мобов из последнего тика (моб -> новая цель, null если цели нет). */
+    private Map<UUID, UUID> lastTargetChanges = Map.of();
+
+    /** Структуры, найденные при последнем сканировании. */
+    private Set<String> lastStructureNames = new HashSet<>();
+
+    /** Флаг: структуры были пересканированы в этом тике. */
+    private boolean structuresJustUpdated = false;
+
     public TargetTracker getTargetTracker() {
         return targetTracker;
     }
@@ -34,6 +46,21 @@ public class ServerEvents {
         return handshakeManager;
     }
 
+    /** Изменения целей мобов из последнего тика. */
+    public Map<UUID, UUID> getLastTargetChanges() {
+        return lastTargetChanges;
+    }
+
+    /** Названия структур Around игрока из последнего сканирования. */
+    public Set<String> getLastStructureNames() {
+        return lastStructureNames;
+    }
+
+    /** Были ли структуры пересканированы в последнем тике. */
+    public boolean areStructuresJustUpdated() {
+        return structuresJustUpdated;
+    }
+
     /**
      * Вызывается каждый серверный тик.
      * Обновляет цели мобов и, при необходимости, структуры.
@@ -43,9 +70,10 @@ public class ServerEvents {
     public void onServerTick(ServerWorld world) {
         if (targetTracker == null) return;
 
-        targetTracker.update(world);
+        lastTargetChanges = targetTracker.update(world);
         ticksSinceUpdate++;
 
+        structuresJustUpdated = false;
         // Структуры сканируем реже — раз в 100 тиков (5 секунд)
         if (ticksSinceUpdate >= 100) {
             for (var player : world.getPlayers()) {
@@ -53,6 +81,8 @@ public class ServerEvents {
                     structureScanner.scan(world, player.getBlockPos(), 1);
                 }
             }
+            lastStructureNames = structureScanner.getStructures();
+            structuresJustUpdated = true;
             ticksSinceUpdate = 0;
         }
     }
@@ -96,6 +126,9 @@ public class ServerEvents {
         targetTracker.clear();
         structureScanner.clear();
         handshakeManager.reset();
+        lastTargetChanges = Map.of();
+        lastStructureNames.clear();
+        structuresJustUpdated = false;
         ticksSinceUpdate = 0;
     }
 }

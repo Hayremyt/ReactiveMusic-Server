@@ -15,11 +15,15 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.ServerLevel;
 
+import java.util.UUID;
+
 @Mod("reactivemusic-server")
 public class ReactiveMusicServerForge {
 
     public static ServerEvents serverEvents;
     public static SimpleChannel channel;
+    public static SimpleChannel targetsChannel;
+    public static SimpleChannel structuresChannel;
     private static int packetId = 0;
 
     public ReactiveMusicServerForge() {
@@ -44,6 +48,34 @@ public class ReactiveMusicServerForge {
                 .consumer(HandshakeResponseMessage::handle)
                 .add();
 
+        // Канал целей мобов
+        targetsChannel = NetworkRegistry.ChannelBuilder
+                .named(HandshakeConstants.CHANNEL_TARGETS)
+                .networkProtocolVersion(() -> "1.3.5")
+                .clientAcceptedVersions(s -> true)
+                .serverAcceptedVersions(s -> true)
+                .simpleChannel();
+
+        targetsChannel.messageBuilder(MobTargetMessage.class, packetId++)
+                .encoder(MobTargetMessage::encode)
+                .decoder(MobTargetMessage::decode)
+                .consumer(MobTargetMessage::handle)
+                .add();
+
+        // Канал структур
+        structuresChannel = NetworkRegistry.ChannelBuilder
+                .named(HandshakeConstants.CHANNEL_STRUCTURES)
+                .networkProtocolVersion(() -> "1.3.5")
+                .clientAcceptedVersions(s -> true)
+                .serverAcceptedVersions(s -> true)
+                .simpleChannel();
+
+        structuresChannel.messageBuilder(StructureMessage.class, packetId++)
+                .encoder(StructureMessage::encode)
+                .decoder(StructureMessage::decode)
+                .consumer(StructureMessage::handle)
+                .add();
+
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::setup);
         FMLJavaModLoadingContext.get().getModEventBus().register(this);
     }
@@ -60,6 +92,26 @@ public class ReactiveMusicServerForge {
         ServerLevel world = event.getPlayer().getLevel();
         if (world == null || !world.isClientSide) {
             serverEvents.onServerTick(world);
+
+            // --- Отправка изменений целей мобов ---
+            var targetChanges = serverEvents.getLastTargetChanges();
+            if (!targetChanges.isEmpty()) {
+                for (var player : world.players()) {
+                    if (!serverEvents.canSendMobTargets(player)) continue;
+                    for (var entry : targetChanges.entrySet()) {
+                        targetsChannel.send(player, new MobTargetMessage(entry.getKey(), entry.getValue()));
+                    }
+                }
+            }
+
+            // --- Отправка структур (только если были пересканированы в этом тике) ---
+            if (serverEvents.areStructuresJustUpdated()) {
+                var structures = serverEvents.getLastStructureNames().toArray(new String[0]);
+                for (var player : world.players()) {
+                    if (!serverEvents.canSendStructureData(player)) continue;
+                    structuresChannel.send(player, new StructureMessage(structures));
+                }
+            }
         }
     }
 
@@ -131,6 +183,73 @@ public class ReactiveMusicServerForge {
         }
 
         public static void handle(HandshakeResponseMessage msg, net.minecraftforge.network.NetworkEvent.Context ctx) {
+            ctx.setPacketHandled(true);
+        }
+    }
+
+    // ---------- MobTargetMessage ----------
+
+    public static class MobTargetMessage {
+        public UUID mobUuid;
+        public UUID targetUuid; // null если цели нет
+
+        public MobTargetMessage() {}
+
+        public MobTargetMessage(UUID mobUuid, UUID targetUuid) {
+            this.mobUuid = mobUuid;
+            this.targetUuid = targetUuid;
+        }
+
+        public static void encode(MobTargetMessage msg, FriendlyByteBuf buf) {
+            buf.writeUuid(msg.mobUuid);
+            if (msg.targetUuid == null) {
+                buf.writeBoolean(false);
+            } else {
+                buf.writeBoolean(true);
+                buf.writeUuid(msg.targetUuid);
+            }
+        }
+
+        public static MobTargetMessage decode(FriendlyByteBuf buf) {
+            UUID mobUuid = buf.readUuid();
+            boolean hasTarget = buf.readBoolean();
+            UUID targetUuid = hasTarget ? buf.readUuid() : null;
+            return new MobTargetMessage(mobUuid, targetUuid);
+        }
+
+        public static void handle(MobTargetMessage msg, net.minecraftforge.network.NetworkEvent.Context ctx) {
+            ctx.setPacketHandled(true);
+        }
+    }
+
+    // ---------- StructureMessage ----------
+
+    public static class StructureMessage {
+        public String[] structures;
+
+        public StructureMessage() {}
+
+        public StructureMessage(String[] structures) {
+            this.structures = structures;
+        }
+
+        public static void encode(StructureMessage msg, FriendlyByteBuf buf) {
+            buf.writeInt(msg.structures.length);
+            for (var s : msg.structures) {
+                buf.writeUtf(s, 255);
+            }
+        }
+
+        public static StructureMessage decode(FriendlyByteBuf buf) {
+            int len = buf.readInt();
+            var arr = new String[len];
+            for (int i = 0; i < len; i++) {
+                arr[i] = buf.readUtf(255);
+            }
+            return new StructureMessage(arr);
+        }
+
+        public static void handle(StructureMessage msg, net.minecraftforge.network.NetworkEvent.Context ctx) {
             ctx.setPacketHandled(true);
         }
     }

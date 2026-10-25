@@ -15,5 +15,11 @@ public final class HandshakeConstants {
     /** Идентификатор сетевого канала (используется всеми лоадерами). */
     public static final String CHANNEL_ID = "reactivemusic:server";
 
+    /** Сервер → Клиент: MobTargetPacket (точные цели мобов от серверного мода). */
+    public static final String CHANNEL_TARGETS = "reactivemusic:server/targets";
+
+    /** Сервер → Клиент: StructurePacket (структуры вокруг игрока от серверного мода). */
+    public static final String CHANNEL_STRUCTURES = "reactivemusic:server/structures";
+
     private HandshakeConstants() {}
 }

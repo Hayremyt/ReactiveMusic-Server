@@ -2,6 +2,7 @@ package circuitlord.reactivemusic.server;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 import net.minecraft.entity.Entity;
@@ -26,10 +27,11 @@ public class TargetTracker {
 
     /**
      * Вызывается каждый тик для обновления целей мобов в мире.
-     * Можно оптимизировать, сканируя только мобы в радиусе около игроков.
+     * Возвращает только те мобы, у которых цель изменилась по сравнению с предыдущим тиком
+     * (включая мобов, которые исчезли — для них значение null).
      */
-    public void update(ServerWorld world) {
-        // Сначала собираем живых мобов и их цели
+    public Map<UUID, UUID> update(ServerWorld world) {
+        Map<UUID, UUID> previous = new HashMap<>(mobTargets);
         Map<UUID, UUID> current = new HashMap<>();
         long now = world.getTime();
 
@@ -47,6 +49,25 @@ public class TargetTracker {
 
         // Удаляем старые записи (мобы, которых больше нет)
         lastSeen.entrySet().removeIf(entry -> now - entry.getValue() > 400L); // 20 секунд
+
+        // Считаем изменения
+        Map<UUID, UUID> changes = new HashMap<>();
+        for (var entry : current.entrySet()) {
+            UUID mob = entry.getKey();
+            UUID newTarget = entry.getValue();
+            UUID oldTarget = previous.get(mob);
+            if (!Objects.equals(oldTarget, newTarget)) {
+                changes.put(mob, newTarget);
+            }
+        }
+        // Мобы, которые были ранее, но исчезли
+        for (var mob : previous.keySet()) {
+            if (!current.containsKey(mob)) {
+                changes.put(mob, null);
+            }
+        }
+
+        return changes;
     }
 
     /**
